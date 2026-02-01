@@ -52,7 +52,7 @@
         /* Device Card */
         .device-card {
             background: var(--card);
-            border: 1px solid var(--border-light);
+            border: 2px solid var(--border-light);
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 14px;
@@ -60,7 +60,7 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
         .device-card.playing {
-            border-color: var(--accent);
+            border-color: #cccccc;
             box-shadow: 0 2px 8px rgba(64,158,255,0.15);
         }
         .device-card.disconnected {
@@ -281,27 +281,27 @@
             color: var(--text-dim);
             text-transform: uppercase;
             letter-spacing: 1px;
-            margin: 14px 0 8px;
+            margin: 10px 0 6px;
         }
         .grid {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
         .item {
             background: #f8f8f8;
             border: 1px solid var(--border-light);
             border-radius: 8px;
-            padding: 12px;
+            padding: 8px 10px;
             min-width: 160px;
             flex: 1 1 160px;
-            max-width: calc(50% - 5px);
+            max-width: calc(50% - 4px);
         }
         .item-wide { flex: 1 1 100%; max-width: 100%; }
         .item-label {
             font-size: 0.75rem;
             color: var(--text-dim);
-            margin-bottom: 6px;
+            margin-bottom: 4px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -520,8 +520,10 @@
     <script>
         // State
         let devices = [];
+        let oldDevices = [];
         let currentDspDeviceId = null;
         let pollTimer = null;
+        let fetchCount = 0; // 调用计数器
 
         // EQ config
         const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -541,6 +543,34 @@
             const m = Math.floor(seconds / 60);
             const s = Math.floor(seconds % 60);
             return m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0');
+        }
+
+        // Check if device content changed
+        function hasDeviceContentChanged(oldDevice, newDevice) {
+            if (!oldDevice) {
+                return true;
+            }
+            return oldDevice.play_url !== newDevice.play_url;
+        }
+
+        // Update only progress bar
+        function updateProgress(deviceId, position, duration) {
+            const card = document.getElementById('card-' + deviceId);
+            if (!card) {
+                return;
+            }
+            const progressBar = card.querySelector('.progress-bar');
+            const progressTime = card.querySelectorAll('.progress-time span');
+
+            if (progressBar && duration > 0) {
+                const percent = Math.min(100, (position / duration) * 100);
+                progressBar.style.width = percent + '%';
+            }
+
+            if (progressTime.length === 2) {
+                progressTime[0].textContent = formatTime(position);
+                progressTime[1].textContent = formatTime(duration);
+            }
         }
 
         // Render device card
@@ -617,13 +647,38 @@
         }
 
         // Render all devices
-        function renderDevices() {
+        function renderDevices(forceRender = false) {
             const container = document.getElementById('device-list');
             if (!devices || devices.length === 0) {
                 container.innerHTML = '<div class="idle-message">No devices found. Scanning...</div>';
                 return;
             }
-            container.innerHTML = devices.map(renderDeviceCard).join('');
+
+            if (forceRender) {
+                // Full re-render
+                container.innerHTML = devices.map(renderDeviceCard).join('');
+            } else {
+                // Smart update: only update changed devices
+                devices.forEach((device, index) => {
+                    const existingCard = document.getElementById('card-' + device.device_id);
+                    if (!existingCard) {
+                        container.innerHTML = devices.map(renderDeviceCard).join('');
+                    } else {
+                        // Device exists, check if content changed
+                        const oldDevice = oldDevices.find(d => d.device_id === device.device_id);
+
+                        if (hasDeviceContentChanged(oldDevice, device)) {
+                            // Content changed, replace card
+                            const newCard = document.createElement('div');
+                            newCard.innerHTML = renderDeviceCard(device);
+                            existingCard.replaceWith(newCard.firstElementChild);
+                        } else {
+                            // Only progress changed, update progress
+                            updateProgress(device.device_id, device.play_position, device.play_duration);
+                        }
+                    }
+                });
+            }
         }
 
         // Fetch devices data
@@ -631,8 +686,10 @@
             try {
                 const r = await fetch('/api/devices');
                 const data = await r.json();
+                oldDevices = devices.slice();
                 devices = data;
-                renderDevices();
+                const forceRender = oldDevices.length === 0 || oldDevices.length !== devices.length;
+                renderDevices(forceRender);
             } catch (e) {
                 console.error('Failed to fetch devices:', e);
             }
@@ -718,8 +775,26 @@
             try {
                 await fetch('/api/device/' + currentDspDeviceId + '/dsp/reset', { method: 'POST' });
                 toast('DSP reset to defaults', 'ok');
-                closeDspModal();
-                fetchDevices();
+                // Reload device data and update modal
+                await fetchDevices();
+                const device = devices.find(d => d.device_id === currentDspDeviceId);
+                if (device) {
+                    const cfg = device.dsp_config || {};
+                    document.getElementById('dsp_enabled').checked = device.dsp_enabled;
+                    ['eq_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el && cfg[id] !== undefined) el.checked = cfg[id];
+                    });
+                    Object.keys(SLIDERS).forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el && cfg[id] !== undefined) { el.value = cfg[id]; updateSliderVal(id); }
+                    });
+                    EQ_BANDS.forEach(freq => {
+                        const k = 'eq_' + freq;
+                        const value = cfg[k] !== undefined ? cfg[k] : 0;
+                        setEqValue(freq, value);
+                    });
+                }
             } catch (e) {
                 toast('Reset failed', 'err');
             }
