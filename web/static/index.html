@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DLNA to AirPlay</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            /* 参考 SensorHub 的浅色主题 */
+            --bg: #ffffff;
+            --card: #ffffff;
+            --border: #444444;
+            --border-light: #dadada;
+            --accent: #409eff;
+            --accent2: #67C23A;
+            --text: #303133;
+            --text-secondary: #606266;
+            --text-dim: #909399;
+            --text-muted: #909399;
+            --hover-bg: #f5f5f5;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f3f3f3;
+            min-height: 100vh;
+            color: var(--text);
+        }
+
+        /* Header */
+        .header {
+            background: var(--card);
+            border-bottom: 1px solid var(--border-light);
+            padding: 16px 20px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .header h1 {
+            font-size: 1rem;
+            font-weight: 500;
+            letter-spacing: 1px;
+            color: var(--text);
+        }
+
+        /* Container */
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+
+        /* Device Card */
+        .device-card {
+            background: var(--card);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 14px;
+            transition: all 0.3s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .device-card.playing {
+            border-color: var(--accent);
+            box-shadow: 0 2px 8px rgba(64,158,255,0.15);
+        }
+        .device-card.disconnected {
+            opacity: 0.5;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .card-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+        .card-badge {
+            font-size: 0.65rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: rgba(64,158,255,0.15);
+            color: var(--accent);
+            border: 1px solid rgba(64,158,255,0.3);
+        }
+        .card-badge.server {
+            background: rgba(103,194,58,0.15);
+            color: var(--accent2);
+            border: 1px solid rgba(103,194,58,0.3);
+        }
+        .card-badge.offline {
+            background: #f5f5f5;
+            color: var(--text-dim);
+            border: 1px solid var(--border-light);
+        }
+
+        /* Now Playing */
+        .now-playing {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+        }
+        .cover-art {
+            width: 72px;
+            height: 72px;
+            border-radius: 8px;
+            background: #f5f5f5;
+            border: 1px solid var(--border-light);
+            flex-shrink: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .cover-art img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .cover-art .placeholder {
+            font-size: 1.5rem;
+            color: var(--text-dim);
+        }
+
+        .track-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .track-info-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .track-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .track-artist {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            margin-top: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .track-audio-info {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        /* DSP Button */
+        .dsp-btn {
+            flex-shrink: 0;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border-light);
+            background: #ffffff;
+            color: var(--text-dim);
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .dsp-btn.active {
+            background: rgba(64,158,255,0.1);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .dsp-btn:hover {
+            background: var(--hover-bg);
+            border-color: var(--accent);
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            margin-top: 12px;
+        }
+        .progress-bar-wrapper {
+            width: 100%;
+            height: 4px;
+            background: #e4e7ed;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 1s linear;
+            width: 0%;
+        }
+        .progress-time {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Buttons */
+        .play-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: none;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: all 0.2s;
+        }
+        .play-btn:hover {
+            opacity: 0.85;
+            transform: translateY(-1px);
+        }
+
+        /* Idle state */
+        .idle-message {
+            text-align: center;
+            padding: 16px 0;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        /* DSP Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 100;
+            justify-content: center;
+            align-items: flex-start;
+            padding-top: 40px;
+            overflow-y: auto;
+        }
+        .modal-overlay.open {
+            display: flex;
+        }
+        .modal {
+            background: #ffffff;
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            padding: 20px;
+            margin-bottom: 40px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .modal-header h2 {
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 1.2rem;
+            cursor: pointer;
+        }
+
+        /* DSP Controls */
+        .section-title {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 14px 0 8px;
+        }
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .item {
+            background: #f8f8f8;
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 12px;
+            min-width: 160px;
+            flex: 1 1 160px;
+            max-width: calc(50% - 5px);
+        }
+        .item-wide { flex: 1 1 100%; max-width: 100%; }
+        .item-label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .item-label .val { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
+
+        input[type="range"] {
+            width: 100%;
+            height: 5px;
+            border-radius: 3px;
+            background: #e4e7ed;
+            outline: none;
+            -webkit-appearance: none;
+            margin-top: 4px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .switch { position: relative; width: 36px; height: 20px; flex-shrink: 0; display: inline-block; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .switch .sl {
+            position: absolute; cursor: pointer; inset: 0;
+            background: #dcdfe6; transition: .2s; border-radius: 20px;
+        }
+        .switch .sl:before {
+            position: absolute; content: ""; height: 14px; width: 14px;
+            left: 3px; bottom: 3px; background: #fff; transition: .2s; border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .switch input:checked + .sl { background: var(--accent); }
+        .switch input:checked + .sl:before { transform: translateX(16px); }
+
+        /* EQ */
+        .eq-container {
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-end;
+            gap: 4px;
+            padding: 8px 0;
+            position: relative;
+        }
+        .eq-band { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 0; }
+        .eq-val { font-size: 0.7rem; color: var(--accent); margin-bottom: 5px; height: 16px; font-weight: 500; }
+        .eq-slider-box {
+            height: 180px;
+            width: 28px;
+            position: relative;
+            background: transparent;
+            border-radius: 12px;
+            cursor: pointer;
+        }
+        .eq-slider-track {
+            position: absolute;
+            left: 50%;
+            top: 8px;
+            bottom: 8px;
+            width: 4px;
+            transform: translateX(-50%);
+            background: #e4e7ed;
+            border-radius: 2px;
+        }
+        .eq-slider-fill {
+            position: absolute;
+            left: 50%;
+            width: 4px;
+            transform: translateX(-50%);
+            background: var(--accent);
+            border-radius: 2px;
+            bottom: 8px;
+            height: 0;
+        }
+        .eq-slider-thumb {
+            position: absolute;
+            left: 50%;
+            width: 16px;
+            height: 16px;
+            transform: translateX(-50%);
+            background: #fff;
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            bottom: calc(50% - 8px);
+        }
+        .eq-slider-thumb:hover {
+            transform: translateX(-50%) scale(1.1);
+        }
+        .eq-slider-thumb.dragging {
+            cursor: grabbing;
+            transform: translateX(-50%) scale(1.15);
+        }
+        .eq-freq { font-size: 0.7rem; color: var(--text-dim); margin-top: 5px; }
+
+        /* Toast */
+        .toast {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; border-radius: 8px; font-size: 0.8rem;
+            opacity: 0; transition: opacity 0.3s; z-index: 200;
+        }
+        .toast.show { opacity: 1; }
+        .toast.ok { background: rgba(76,175,80,0.9); color: #fff; }
+        .toast.err { background: rgba(244,67,54,0.9); color: #fff; }
+
+        @media (max-width: 420px) {
+            .item { max-width: 100%; }
+            .cover-art { width: 60px; height: 60px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>DLNA to AirPlay Bridge</h1>
+    </div>
+
+    <div class="container" id="device-list">
+        <!-- Device cards rendered by JS -->
+        <div class="idle-message">Loading devices...</div>
+    </div>
+
+    <!-- DSP Settings Modal -->
+    <div class="modal-overlay" id="dsp-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>DSP Settings - <span id="dsp-modal-device-name"></span></h2>
+                <button class="modal-close" onclick="closeDspModal()">&times;</button>
+            </div>
+
+            <!-- Master switch -->
+            <div class="grid">
+                <div class="item">
+                    <div class="item-label">
+                        <span>Enable DSP</span>
+                        <label class="switch"><input type="checkbox" id="dsp_enabled"><span class="sl"></span></label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 10-Band EQ -->
+            <div class="section-title">Equalizer</div>
+            <div style="background: #f8f8f8; border: 1px solid var(--border-light); border-radius: 8px; padding: 12px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                    <span style="font-size:0.8rem;">10-Band EQ</span>
+                    <label class="switch"><input type="checkbox" id="eq_enabled" checked><span class="sl"></span></label>
+                </div>
+                <div class="eq-container" id="eq_container">
+                </div>
+            </div>
+
+            <!-- Spectral Enhancement -->
+            <div class="section-title">Spectral Enhancement</div>
+            <div class="grid">
+                <div class="item">
+                    <div class="item-label">
+                        <span>FFT Spectral</span>
+                        <label class="switch"><input type="checkbox" id="use_spectral" checked><span class="sl"></span></label>
+                    </div>
+                </div>
+                <div class="item">
+                    <div class="item-label"><span>High Freq Gain</span><span class="val" id="highfreq_gain_v">1.3x</span></div>
+                    <input type="range" id="highfreq_gain" min="1.0" max="2.0" step="0.1" value="1.3"/>
+                </div>
+                <div class="item">
+                    <div class="item-label"><span>Low Freq Gain</span><span class="val" id="lowfreq_gain_v">1.2x</span></div>
+                    <input type="range" id="lowfreq_gain" min="1.0" max="2.0" step="0.1" value="1.2">
+                </div>
+            </div>
+
+            <!-- Dynamic Compression -->
+            <div class="section-title">Dynamic Compression</div>
+            <div class="grid">
+                <div class="item">
+                    <div class="item-label"><span>Enable</span><label class="switch"><input type="checkbox" id="use_compression" checked><span class="sl"></span></label></div>
+                </div>
+                <div class="item">
+                    <div class="item-label"><span>Threshold</span><span class="val" id="compression_threshold_v">0.70</span></div>
+                    <input type="range" id="compression_threshold" min="0.3" max="1.0" step="0.05" value="0.7">
+                </div>
+                <div class="item">
+                    <div class="item-label"><span>Ratio</span><span class="val" id="compression_ratio_v">3:1</span></div>
+                    <input type="range" id="compression_ratio" min="1.5" max="10" step="0.5" value="3.0">
+                </div>
+                <div class="item">
+                    <div class="item-label"><span>Makeup Gain</span><span class="val" id="compression_makeup_v">1.2x</span></div>
+                    <input type="range" id="compression_makeup" min="1.0" max="2.0" step="0.1" value="1.2">
+                </div>
+            </div>
+
+            <!-- Stereo -->
+            <div class="section-title">Stereo</div>
+            <div class="grid">
+                <div class="item">
+                    <div class="item-label"><span>Enable Stereo</span><label class="switch"><input type="checkbox" id="use_stereo" checked><span class="sl"></span></label></div>
+                </div>
+                <div class="item">
+                    <div class="item-label"><span>Width</span><span class="val" id="stereo_width_v">1.2x</span></div>
+                    <input type="range" id="stereo_width" min="0.5" max="2.0" step="0.1" value="1.2">
+                </div>
+            </div>
+
+            <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
+                <button class="play-btn" style="background: #f5f5f5; color: var(--text); border: 1px solid var(--border-light);" onclick="resetDsp()">Reset</button>
+                <button class="play-btn" onclick="saveDsp()">Save &amp; Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // State
+        let devices = [];
+        let currentDspDeviceId = null;
+        let pollTimer = null;
+
+        // EQ config
+        const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+        const EQ_LABELS = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+        const SLIDERS = {
+            'highfreq_gain': v => v.toFixed(1) + 'x',
+            'lowfreq_gain': v => v.toFixed(1) + 'x',
+            'compression_threshold': v => v.toFixed(2),
+            'compression_ratio': v => v.toFixed(1) + ':1',
+            'compression_makeup': v => v.toFixed(1) + 'x',
+            'stereo_width': v => v.toFixed(1) + 'x',
+        };
+
+        // Format time
+        function formatTime(seconds) {
+            if (!seconds || seconds <= 0) return '00:00';
+            const m = Math.floor(seconds / 60);
+            const s = Math.floor(seconds % 60);
+            return m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0');
+        }
+
+        // Render device card
+        function renderDeviceCard(device) {
+            const isPlaying = device.play_state === 'PLAYING';
+            const isStopped = device.play_state === 'STOPPED';
+            const isServer = device.device_type === 'server_speaker';
+            const isConnected = device.connected;
+
+            let cardClass = 'device-card';
+            if (isPlaying) cardClass += ' playing';
+            if (!isConnected) cardClass += ' disconnected';
+
+            let badgeClass = isServer ? 'card-badge server' : 'card-badge';
+            if (!isConnected) badgeClass = 'card-badge offline';
+            let badgeText = isServer ? 'Server Speaker' : (isConnected ? 'AirPlay' : 'Offline');
+
+            let progressPercent = 0;
+            if (device.play_duration > 0) {
+                progressPercent = Math.min(100, (device.play_position / device.play_duration) * 100);
+            }
+
+            let audioInfo = '';
+            if (device.audio_format) {
+                audioInfo = device.audio_format;
+                if (device.audio_bitrate) audioInfo += ' ' + device.audio_bitrate;
+                if (device.audio_sample_rate) audioInfo += ' · ' + (device.audio_sample_rate / 1000).toFixed(1) + 'kHz';
+                if (device.audio_channels) audioInfo += ' · ' + (device.audio_channels === 2 ? 'Stereo' : 'Mono');
+            }
+
+            let content = '';
+            if (isStopped || !device.play_title) {
+                content = `<div class="idle-message">Waiting for playback...</div>`;
+            } else {
+                content = `
+                    <div class="now-playing">
+                        <div class="cover-art">
+                            ${device.play_cover_url
+                                ? `<img src="${device.play_cover_url}" alt="cover" onerror="this.parentElement.innerHTML='<span class=placeholder>&#9835;</span>'">`
+                                : '<span class="placeholder">&#9835;</span>'}
+                        </div>
+                        <div class="track-info">
+                            <div class="track-info-header">
+                                <div style="min-width:0; flex:1;">
+                                    <div class="track-title">${device.play_title || 'Unknown'}</div>
+                                    <div class="track-artist">${device.play_artist || ''}${device.play_album ? ' - ' + device.play_album : ''}</div>
+                                </div>
+                                <button class="dsp-btn ${device.dsp_enabled ? 'active' : ''}" onclick="openDspModal('${device.device_id}')">
+                                    DSP ${device.dsp_enabled ? 'ON' : 'OFF'}
+                                </button>
+                            </div>
+                            ${audioInfo ? `<div class="track-audio-info">${audioInfo}</div>` : ''}
+                        </div>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-bar-wrapper">
+                            <div class="progress-bar" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <div class="progress-time">
+                            <span>${formatTime(device.play_position)}</span>
+                            <span>${formatTime(device.play_duration)}</span>
+                        </div>
+                    </div>`;
+            }
+
+            return `
+                <div class="${cardClass}" id="card-${device.device_id}">
+                    <div class="card-header">
+                        <span class="card-title">${device.device_name}</span>
+                        <span class="${badgeClass}">${badgeText}</span>
+                    </div>
+                    ${content}
+                </div>`;
+        }
+
+        // Render all devices
+        function renderDevices() {
+            const container = document.getElementById('device-list');
+            if (!devices || devices.length === 0) {
+                container.innerHTML = '<div class="idle-message">No devices found. Scanning...</div>';
+                return;
+            }
+            container.innerHTML = devices.map(renderDeviceCard).join('');
+        }
+
+        // Fetch devices data
+        async function fetchDevices() {
+            try {
+                const r = await fetch('/api/devices');
+                const data = await r.json();
+                devices = data;
+                renderDevices();
+            } catch (e) {
+                console.error('Failed to fetch devices:', e);
+            }
+        }
+
+        // Start polling
+        function startPolling() {
+            fetchDevices();
+            pollTimer = setInterval(fetchDevices, 1000);
+        }
+
+        // DSP Modal
+        function openDspModal(deviceId) {
+            currentDspDeviceId = deviceId;
+            const device = devices.find(d => d.device_id === deviceId);
+            if (!device) return;
+
+            document.getElementById('dsp-modal-device-name').textContent = device.device_name;
+
+            // Load DSP config into modal
+            const cfg = device.dsp_config || {};
+            document.getElementById('dsp_enabled').checked = device.dsp_enabled;
+
+            ['eq_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el && cfg[id] !== undefined) el.checked = cfg[id];
+            });
+
+            Object.keys(SLIDERS).forEach(id => {
+                const el = document.getElementById(id);
+                if (el && cfg[id] !== undefined) { el.value = cfg[id]; updateSliderVal(id); }
+            });
+
+            EQ_BANDS.forEach(freq => {
+                const k = 'eq_' + freq;
+                const value = cfg[k] !== undefined ? cfg[k] : 0;
+                setEqValue(freq, value);
+            });
+
+            document.getElementById('dsp-modal').classList.add('open');
+        }
+
+        function closeDspModal() {
+            document.getElementById('dsp-modal').classList.remove('open');
+            currentDspDeviceId = null;
+        }
+
+        async function saveDsp() {
+            if (!currentDspDeviceId) return;
+
+            const config = {};
+            ['eq_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) config[id] = el.checked;
+            });
+            Object.keys(SLIDERS).forEach(id => {
+                const el = document.getElementById(id);
+                if (el) config[id] = parseFloat(el.value);
+            });
+            EQ_BANDS.forEach(freq => {
+                const k = 'eq_' + freq;
+                config[k] = getEqValue(freq);
+            });
+
+            try {
+                await fetch('/api/device/' + currentDspDeviceId + '/dsp', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        enabled: document.getElementById('dsp_enabled').checked,
+                        config: config
+                    })
+                });
+                toast('DSP settings applied', 'ok');
+                fetchDevices();
+            } catch (e) {
+                toast('Save failed', 'err');
+            }
+        }
+
+        async function resetDsp() {
+            if (!currentDspDeviceId) return;
+            try {
+                await fetch('/api/device/' + currentDspDeviceId + '/dsp/reset', { method: 'POST' });
+                toast('DSP reset to defaults', 'ok');
+                closeDspModal();
+                fetchDevices();
+            } catch (e) {
+                toast('Reset failed', 'err');
+            }
+        }
+
+        // EQ initialization - Custom vertical sliders
+        function initEQ() {
+            const c = document.getElementById('eq_container');
+            EQ_BANDS.forEach((freq, i) => {
+                const band = document.createElement('div');
+                band.className = 'eq-band';
+                band.innerHTML = `
+                    <span class="eq-val" id="eq_${freq}_v">0</span>
+                    <div class="eq-slider-box" data-freq="${freq}">
+                        <div class="eq-slider-track"></div>
+                        <div class="eq-slider-fill" id="eq_${freq}_fill"></div>
+                        <div class="eq-slider-thumb" id="eq_${freq}_thumb"></div>
+                        <input type="hidden" id="eq_${freq}" value="0">
+                    </div>
+                    <span class="eq-freq">${EQ_LABELS[i]}</span>`;
+                c.appendChild(band);
+
+                // Setup drag handling
+                const box = band.querySelector('.eq-slider-box');
+                const thumb = band.querySelector('.eq-slider-thumb');
+                setupEqSlider(box, thumb, freq);
+
+                // Set initial value
+                setEqValue(freq, 0);
+            });
+        }
+
+        function setupEqSlider(box, thumb, freq) {
+            let isDragging = false;
+            const boxHeight = 180;
+            const padding = 8;
+            const trackHeight = boxHeight - padding * 2;
+
+            const updateFromY = (clientY) => {
+                const rect = box.getBoundingClientRect();
+                let y = clientY - rect.top - padding;
+                y = Math.max(0, Math.min(trackHeight, y));
+
+                // Convert position to value (-12 to +12)
+                // Top (y=0) = +12, Bottom (y=trackHeight) = -12
+                const ratio = 1 - (y / trackHeight);
+                const value = (ratio * 24) - 12;
+                const roundedValue = Math.round(value); // Round to 1
+
+                setEqValue(freq, roundedValue);
+            };
+
+            const onMouseDown = (e) => {
+                e.preventDefault();
+                isDragging = true;
+                thumb.classList.add('dragging');
+                updateFromY(e.clientY);
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            };
+
+            const onMouseMove = (e) => {
+                if (isDragging) {
+                    updateFromY(e.clientY);
+                }
+            };
+
+            const onMouseUp = () => {
+                isDragging = false;
+                thumb.classList.remove('dragging');
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            };
+
+            // Touch support
+            const onTouchStart = (e) => {
+                e.preventDefault();
+                isDragging = true;
+                thumb.classList.add('dragging');
+                updateFromY(e.touches[0].clientY);
+            };
+
+            const onTouchMove = (e) => {
+                if (isDragging) {
+                    e.preventDefault();
+                    updateFromY(e.touches[0].clientY);
+                }
+            };
+
+            const onTouchEnd = () => {
+                isDragging = false;
+                thumb.classList.remove('dragging');
+            };
+
+            box.addEventListener('mousedown', onMouseDown);
+            box.addEventListener('touchstart', onTouchStart, { passive: false });
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', onTouchEnd);
+
+            // Click on track
+            box.addEventListener('click', (e) => {
+                if (!isDragging) {
+                    updateFromY(e.clientY);
+                }
+            });
+        }
+
+        function setEqValue(freq, value) {
+            value = Math.max(-12, Math.min(12, value));
+            const input = document.getElementById('eq_' + freq);
+            const valEl = document.getElementById('eq_' + freq + '_v');
+            const thumb = document.getElementById('eq_' + freq + '_thumb');
+            const fill = document.getElementById('eq_' + freq + '_fill');
+            const box = thumb ? thumb.parentElement : null;
+
+            if (input) input.value = value;
+            if (valEl) valEl.textContent = (value >= 0 ? '+' : '') + value;
+
+            if (!box) return;
+
+            // Calculate position
+            // value +12 = top, value -12 = bottom
+            // ratio: 0 = bottom, 1 = top
+            const ratio = (value + 12) / 24;
+            const boxHeight = 180;
+            const padding = 8;
+            const trackHeight = boxHeight - padding * 2; // 164
+            const thumbHeight = 16;
+
+            // Thumb center position from bottom
+            const centerFromBottom = padding + (ratio * trackHeight);
+            // Bottom position = center - half thumb height
+            const bottomPos = centerFromBottom - (thumbHeight / 2);
+            if (thumb) thumb.style.bottom = `${bottomPos}px`;
+
+            // Update fill bar - from bottom to thumb position
+            if (fill) {
+                // Fill height = from bottom padding to thumb center
+                const fillHeight = ratio * trackHeight;
+                fill.style.height = `${fillHeight}px`;
+            }
+        }
+
+        function getEqValue(freq) {
+            const input = document.getElementById('eq_' + freq);
+            return input ? parseFloat(input.value) : 0;
+        }
+
+        function updateSliderVal(id) {
+            const el = document.getElementById(id);
+            const vl = document.getElementById(id + '_v');
+            if (!el || !vl || !SLIDERS[id]) return;
+            vl.textContent = SLIDERS[id](parseFloat(el.value));
+        }
+
+        function toast(msg, type) {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = 'toast show ' + type;
+            setTimeout(() => el.className = 'toast', 2000);
+        }
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            initEQ();
+            Object.keys(SLIDERS).forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('input', () => updateSliderVal(id));
+            });
+            startPolling();
+        });
+    </script>
+</body>
+</html>

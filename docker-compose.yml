@@ -1,0 +1,32 @@
+services:
+  dlna-airplay-bridge:
+    build: .
+    container_name: dlna-airplay-bridge
+    restart: unless-stopped
+
+    # Host network is REQUIRED for:
+    # - SSDP multicast discovery (239.255.255.250:1900)
+    # - AirPlay device discovery via mDNS/Bonjour
+    # - DLNA device advertisement to local network
+    network_mode: host
+
+    volumes:
+      # Persist device configuration (DSP settings, etc.)
+      - ./config.json:/app/config.json
+
+    environment:
+      # Python unbuffered output for better logging
+      - PYTHONUNBUFFERED=1
+
+    # Optional: if you need local audio output (Server Speaker)
+    # Uncomment the following to access host audio devices
+    # devices:
+    #   - /dev/snd:/dev/snd
+    # group_add:
+    #   - audio
+
+# Note: Since network_mode: host is used, ports are not mapped here
+# The application will use:
+# - Port 8088: DLNA HTTP service
+# - Port 8089: Web control panel
+# - Port 1900/UDP: SSDP multicast (shared with other UPnP devices)
