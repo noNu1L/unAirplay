@@ -1,6 +1,8 @@
 services:
   dlna-airplay-bridge:
-    build: ../..
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: dlna-airplay-bridge
     restart: unless-stopped
 
