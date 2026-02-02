@@ -14,8 +14,7 @@ services:
 
     volumes:
       # Persist device configuration (DSP settings, etc.)
-      - ./config.json:/app/config.json
-
+      - ./../:/app/
     environment:
       # Python unbuffered output for better logging
       - PYTHONUNBUFFERED=1
