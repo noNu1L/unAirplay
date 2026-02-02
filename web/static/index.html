@@ -56,7 +56,6 @@
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 14px;
-            transition: all 0.3s;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
         .device-card.playing {
@@ -192,7 +191,6 @@
             height: 100%;
             background: var(--accent);
             border-radius: 2px;
-            transition: width 1s linear;
             width: 0%;
         }
         .progress-time {
@@ -217,11 +215,9 @@
             font-weight: 500;
             cursor: pointer;
             margin-top: 8px;
-            transition: all 0.2s;
         }
         .play-btn:hover {
             opacity: 0.85;
-            transform: translateY(-1px);
         }
 
         /* Idle state */
@@ -496,11 +492,11 @@
                 </div>
             </div>
 
-            <!-- Stereo -->
-            <div class="section-title">Stereo</div>
+            <!-- Stereo Widening -->
+            <div class="section-title">Stereo Widening</div>
             <div class="grid">
                 <div class="item">
-                    <div class="item-label"><span>Enable Stereo</span><label class="switch"><input type="checkbox" id="use_stereo" checked><span class="sl"></span></label></div>
+                    <div class="item-label"><span>Enable</span><label class="switch"><input type="checkbox" id="use_stereo" checked><span class="sl"></span></label></div>
                 </div>
                 <div class="item">
                     <div class="item-label"><span>Width</span><span class="val" id="stereo_width_v">1.2x</span></div>
