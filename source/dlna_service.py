@@ -125,6 +125,22 @@ AV_TRANSPORT_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <argument><name>CurrentTransportStatus</name><direction>out</direction><relatedStateVariable>TransportStatus</relatedStateVariable></argument>
       <argument><name>CurrentSpeed</name><direction>out</direction><relatedStateVariable>TransportPlaySpeed</relatedStateVariable></argument>
     </argumentList></action>
+    <action><name>GetMediaInfo</name><argumentList>
+      <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>
+      <argument><name>NrTracks</name><direction>out</direction><relatedStateVariable>NumberOfTracks</relatedStateVariable></argument>
+      <argument><name>MediaDuration</name><direction>out</direction><relatedStateVariable>CurrentMediaDuration</relatedStateVariable></argument>
+      <argument><name>CurrentURI</name><direction>out</direction><relatedStateVariable>AVTransportURI</relatedStateVariable></argument>
+      <argument><name>CurrentURIMetaData</name><direction>out</direction><relatedStateVariable>AVTransportURIMetaData</relatedStateVariable></argument>
+      <argument><name>NextURI</name><direction>out</direction><relatedStateVariable>NextAVTransportURI</relatedStateVariable></argument>
+      <argument><name>NextURIMetaData</name><direction>out</direction><relatedStateVariable>NextAVTransportURIMetaData</relatedStateVariable></argument>
+      <argument><name>PlayMedium</name><direction>out</direction><relatedStateVariable>PlaybackStorageMedium</relatedStateVariable></argument>
+      <argument><name>RecordMedium</name><direction>out</direction><relatedStateVariable>RecordStorageMedium</relatedStateVariable></argument>
+      <argument><name>WriteStatus</name><direction>out</direction><relatedStateVariable>RecordMediumWriteStatus</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>GetCurrentTransportActions</name><argumentList>
+      <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>
+      <argument><name>Actions</name><direction>out</direction><relatedStateVariable>CurrentTransportActions</relatedStateVariable></argument>
+    </argumentList></action>
   </actionList>
   <serviceStateTable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_InstanceID</name><dataType>ui4</dataType></stateVariable>
@@ -133,6 +149,7 @@ AV_TRANSPORT_XML = """<?xml version="1.0" encoding="UTF-8"?>
     <stateVariable sendEvents="no"><name>TransportState</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>TransportStatus</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>TransportPlaySpeed</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>CurrentTransportActions</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_SeekMode</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_SeekTarget</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>CurrentTrack</name><dataType>ui4</dataType></stateVariable>
@@ -143,6 +160,13 @@ AV_TRANSPORT_XML = """<?xml version="1.0" encoding="UTF-8"?>
     <stateVariable sendEvents="no"><name>AbsoluteTimePosition</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>RelativeCounterPosition</name><dataType>i4</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>AbsoluteCounterPosition</name><dataType>i4</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>NumberOfTracks</name><dataType>ui4</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>CurrentMediaDuration</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>NextAVTransportURI</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>NextAVTransportURIMetaData</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>PlaybackStorageMedium</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>RecordStorageMedium</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>RecordMediumWriteStatus</name><dataType>string</dataType></stateVariable>
   </serviceStateTable>
 </scpd>"""
 
@@ -475,7 +499,7 @@ class DLNAService:
             log_info("Playback", f"Play: {device.device_name}")
 
             event_bus.publish(cmd_play(device.device_id, device.play_url, device.play_position))
-            # TODO 大文件解码Seek行为待时间比较长,需要缓存层解决
+            # TODO 大文件解码Seek行为等待时间比较长,需要缓存层解决
             response = soap_response("Play", "AVTransport")
 
         elif action == "Stop":
@@ -511,11 +535,12 @@ class DLNAService:
         elif action == "GetPositionInfo":
             position_str = device.format_position()
             duration_str = device.format_duration()
+            uri_escaped = xml_escape(device.play_url) if device.play_url else ""
             response = soap_response("GetPositionInfo", "AVTransport", f"""
       <Track>1</Track>
       <TrackDuration>{duration_str}</TrackDuration>
       <TrackMetaData></TrackMetaData>
-      <TrackURI>{device.play_url}</TrackURI>
+      <TrackURI>{uri_escaped}</TrackURI>
       <RelTime>{position_str}</RelTime>
       <AbsTime>{position_str}</AbsTime>
       <RelCount>2147483647</RelCount>
@@ -527,6 +552,34 @@ class DLNAService:
       <CurrentTransportState>{device.play_state}</CurrentTransportState>
       <CurrentTransportStatus>OK</CurrentTransportStatus>
       <CurrentSpeed>1</CurrentSpeed>""")
+
+        elif action == "GetMediaInfo":
+            duration_str = device.format_duration()
+            uri_escaped = xml_escape(device.play_url) if device.play_url else ""
+            response = soap_response("GetMediaInfo", "AVTransport", f"""
+      <NrTracks>1</NrTracks>
+      <MediaDuration>{duration_str}</MediaDuration>
+      <CurrentURI>{uri_escaped}</CurrentURI>
+      <CurrentURIMetaData></CurrentURIMetaData>
+      <NextURI></NextURI>
+      <NextURIMetaData></NextURIMetaData>
+      <PlayMedium>NETWORK</PlayMedium>
+      <RecordMedium>NOT_IMPLEMENTED</RecordMedium>
+      <WriteStatus>NOT_IMPLEMENTED</WriteStatus>""")
+
+        # [DLNA standard] GetCurrentTransportActions - return available actions based on state
+        elif action == "GetCurrentTransportActions":
+            # Return available actions based on current state
+            if device.play_state == "PLAYING":
+                actions = "Pause,Stop,Seek"
+            elif device.play_state == "PAUSED_PLAYBACK":
+                actions = "Play,Stop"
+            elif device.play_state == "TRANSITIONING":
+                actions = "Stop"
+            else:  # STOPPED
+                actions = "Play"
+            response = soap_response("GetCurrentTransportActions", "AVTransport",
+                                   f"<Actions>{actions}</Actions>")
 
         else:
             response = soap_response(action or "Unknown", "AVTransport")
@@ -671,6 +724,7 @@ class DLNAService:
         expired_sids = []
 
         for sid, sub_info in subscribers.items():
+            #TODO  订阅设备过期问题待修复
             if sub_info["expires"] < now:
                 expired_sids.append(sid)
                 continue

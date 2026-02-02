@@ -9,12 +9,15 @@ import threading
 import subprocess
 import sys
 import time
+import asyncio
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 import sounddevice as sd
 
 from core.utils import log_info, log_debug, log_warning, log_error
+from core.event_bus import event_bus
+from core.events import state_changed
 from output.system_volume_controller import create_system_volume_controller
 from config import SAMPLE_RATE, CHANNELS, CHUNK_DURATION_MS, BUFFER_SIZE
 
@@ -66,6 +69,11 @@ class ServerSpeakerOutput:
         self._current_url: Optional[str] = None
         self._current_position = 0.0
         self._playback_start_time = 0.0
+
+        try:
+            self._event_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._event_loop = None
 
         # System volume controller
         self._volume_controller = create_system_volume_controller()
@@ -138,6 +146,7 @@ class ServerSpeakerOutput:
         log_debug("ServerSpeaker", f"Decoder thread started: {device_name}")
 
         buffer = b""
+        first_data_received = False
 
         while self._is_playing and self._decoder_process:
             try:
@@ -145,6 +154,19 @@ class ServerSpeakerOutput:
                 if not data:
                     log_info("ServerSpeaker", f"Decoder stream ended: {device_name}")
                     break
+
+                if not first_data_received:
+                    first_data_received = True
+                    log_debug("ServerSpeaker", f"First audio data received from FFmpeg: {device_name}")
+
+                    try:
+                        if self._event_loop and self._event_loop.is_running():
+                            asyncio.run_coroutine_threadsafe(
+                                event_bus.publish_async(state_changed(self._device.device_id, state=self._device.play_state)),
+                                self._event_loop
+                            )
+                    except Exception as e:
+                        log_error("ServerSpeaker.py", f"Failed to notify DLNA client of state change: {e}")
 
                 buffer += data
 

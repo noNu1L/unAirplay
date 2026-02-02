@@ -19,6 +19,8 @@ from pyatv.protocols.raop.audio_source import AudioSource
 from pyatv.interface import MediaMetadata
 
 from core.utils import log_info, log_debug, log_warning, log_error
+from core.event_bus import event_bus
+from core.events import state_changed
 from config import SAMPLE_RATE, CHANNELS
 
 if TYPE_CHECKING:
@@ -87,6 +89,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         self._started = False
         self._closed = False
         self._eof = False
+        self._first_data_received = False  # Track first FFmpeg data
 
         # Internal buffer for partial reads
         self._buffer = b""
@@ -196,7 +199,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         enhanced = (enhanced * 32767).astype(np.int16)
         return enhanced.tobytes()
 
-    async def readframes(self, nframes: int) -> bytes:
+    async def readframes(self, nframes: int) -> str | bytes:
         """
         Read audio frames (called by pyatv).
 
@@ -206,6 +209,8 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         Returns:
             Raw PCM bytes (16-bit signed, little endian)
         """
+        device_name = self._device.device_name
+
         if not self._started:
             self._start_ffmpeg()
 
@@ -231,6 +236,15 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
                 self._eof = True
                 log_debug("AirPlayFFmpegDspAudioSource", "EOF from FFmpeg")
                 return AudioSource.NO_FRAMES
+
+            if not self._first_data_received:
+                self._first_data_received = True
+                log_info("AirPlayFFmpegDspAudioSource", f"First audio data received from FFmpeg: {device_name}")
+
+                try:
+                    await event_bus.publish_async(state_changed(self._device.device_id, state=self._device.play_state))
+                except Exception as e:
+                    log_error("AirPlayFFmpegDspAudioSource.py", f"Failed to notify DLNA client of state change: {e}")
 
             # Apply DSP if enhancer is available and DSP is enabled
             if self._enhancer and (not self._device or self._device.dsp_enabled):
