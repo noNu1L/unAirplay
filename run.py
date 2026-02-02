@@ -27,7 +27,7 @@ from device.virtual_device import VirtualDevice
 from source.dlna_service import DLNAService
 from output.airplay_output import AirPlayOutputManager
 from output.server_speaker import ServerSpeakerOutput
-from enhancer.dsp_scipy import ScipyEnhancer
+from enhancer.dsp_numpy import NumpyEnhancer as ScipyEnhancer
 from web.server import WebServer
 
 

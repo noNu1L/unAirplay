@@ -1,23 +1,22 @@
 """
-基于 scipy 的 DSP 音频增强器
+Pure numpy DSP Audio Enhancer (no scipy dependency)
 """
 import numpy as np
-from scipy import signal
-from scipy.fft import rfft, irfft, rfftfreq
+from numpy.fft import rfft, irfft, rfftfreq
 
 from core.utils import log
 from config import DEFAULT_DSP_CONFIG
 from .base import BaseEnhancer
 
-# 10 频段均衡器频率 (Hz)
+# 10-band equalizer frequencies (Hz)
 EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
 
 def _design_peak_filter(freq, gain_db, q, sample_rate):
     """
-    设计峰值滤波器 (Peaking EQ) 的二阶 IIR 系数
+    Design peaking EQ filter (2nd order IIR coefficients)
 
-    基于 Robert Bristow-Johnson 的 Audio EQ Cookbook
+    Based on Robert Bristow-Johnson's Audio EQ Cookbook
     """
     if gain_db == 0:
         return None
@@ -39,71 +38,234 @@ def _design_peak_filter(freq, gain_db, q, sample_rate):
     return b, a
 
 
-class ScipyEnhancer(BaseEnhancer):
+def _design_butterworth(cutoff, sample_rate, btype='low', order=2):
     """
-    基于 scipy 的数字信号处理增强器
+    Design Butterworth filter coefficients (2nd order)
 
-    功能：
-    - 10 频段图形均衡器
-    - 高频增强（补偿压缩损失的高频）
-    - 低频增强（增加低音厚度）
-    - 动态范围压缩
-    - 立体声增强
-    - 频谱增强
+    Uses bilinear transform to design IIR filter
+
+    Args:
+        cutoff: Cutoff frequency (Hz)
+        sample_rate: Sample rate
+        btype: 'low' or 'high'
+        order: Filter order (currently only supports 2)
+
+    Returns:
+        b, a: Filter coefficients
+    """
+    # Pre-warping
+    nyquist = sample_rate / 2
+    normalized_cutoff = cutoff / nyquist
+
+    if normalized_cutoff >= 1.0:
+        return None, None
+
+    # Analog prototype frequency
+    warped = np.tan(np.pi * normalized_cutoff / 2)
+
+    # 2nd order Butterworth filter
+    if btype == 'low':
+        # Lowpass filter
+        k = warped
+        k2 = k * k
+        sqrt2 = np.sqrt(2.0)
+
+        a0 = 1 + sqrt2 * k + k2
+        b0 = k2 / a0
+        b1 = 2 * k2 / a0
+        b2 = k2 / a0
+        a1 = 2 * (k2 - 1) / a0
+        a2 = (1 - sqrt2 * k + k2) / a0
+
+    elif btype == 'high':
+        # Highpass filter
+        k = warped
+        k2 = k * k
+        sqrt2 = np.sqrt(2.0)
+
+        a0 = 1 + sqrt2 * k + k2
+        b0 = 1 / a0
+        b1 = -2 / a0
+        b2 = 1 / a0
+        a1 = 2 * (k2 - 1) / a0
+        a2 = (1 - sqrt2 * k + k2) / a0
+    else:
+        return None, None
+
+    b = np.array([b0, b1, b2])
+    a = np.array([1.0, a1, a2])
+
+    return b, a
+
+
+def _lfilter(b, a, x):
+    """
+    IIR filter implementation (replaces scipy.signal.lfilter)
+
+    Uses Direct Form II Transposed structure
+
+    Args:
+        b: Numerator coefficients (feedforward)
+        a: Denominator coefficients (feedback), a[0] should be 1.0
+        x: Input signal
+
+    Returns:
+        y: Filtered signal
+    """
+    n = len(x)
+    nb = len(b)
+    na = len(a)
+
+    # Ensure a[0] = 1
+    if a[0] != 1.0:
+        b = b / a[0]
+        a = a / a[0]
+
+    # Output array
+    y = np.zeros(n)
+
+    # State variables (delay line)
+    z = np.zeros(max(nb, na))
+
+    for i in range(n):
+        # Compute output
+        y[i] = b[0] * x[i] + z[0]
+
+        # Update state
+        for j in range(len(z) - 1):
+            z[j] = z[j + 1]
+            if j + 1 < nb:
+                z[j] += b[j + 1] * x[i]
+            if j + 1 < na:
+                z[j] -= a[j + 1] * y[i]
+
+        z[-1] = 0
+        if nb > 1:
+            z[nb - 2] = b[nb - 1] * x[i] if nb - 1 < len(z) else 0
+        if na > 1 and na - 2 < len(z):
+            z[na - 2] -= a[na - 1] * y[i]
+
+    return y
+
+
+def _lfilter_fast(b, a, x):
+    """
+    Fast IIR filter implementation (numpy vectorized)
+
+    Optimized implementation for 2nd order filters
+    """
+    n = len(x)
+    y = np.zeros(n)
+
+    # 2nd order filter state
+    z1, z2 = 0.0, 0.0
+
+    b0, b1, b2 = b[0], b[1], b[2]
+    a1, a2 = a[1], a[2]
+
+    for i in range(n):
+        xi = x[i]
+        yi = b0 * xi + z1
+        z1 = b1 * xi - a1 * yi + z2
+        z2 = b2 * xi - a2 * yi
+        y[i] = yi
+
+    return y
+
+
+def _filtfilt(b, a, x):
+    """
+    Zero-phase filtering (replaces scipy.signal.filtfilt)
+
+    Eliminates phase delay by forward and backward filtering
+    """
+    # Edge padding to reduce edge effects
+    pad_len = 3 * max(len(b), len(a))
+
+    # Reflection padding
+    if len(x) > pad_len:
+        x_padded = np.concatenate([
+            2 * x[0] - x[pad_len:0:-1],
+            x,
+            2 * x[-1] - x[-2:-pad_len-2:-1]
+        ])
+    else:
+        x_padded = x
+
+    # Forward filtering
+    y = _lfilter_fast(b, a, x_padded)
+
+    # Backward filtering
+    y = _lfilter_fast(b, a, y[::-1])[::-1]
+
+    # Remove padding
+    if len(x) > pad_len:
+        y = y[pad_len:-pad_len]
+
+    return y
+
+
+class NumpyEnhancer(BaseEnhancer):
+    """
+    Pure numpy DSP enhancer (no scipy dependency)
+
+    Features:
+    - 10-band graphic equalizer
+    - High frequency enhancement (compensate compression loss)
+    - Low frequency enhancement (add bass thickness)
+    - Dynamic range compression
+    - Stereo enhancement
+    - Spectral enhancement
     """
 
     def __init__(self, sample_rate: int = 44100):
         super().__init__(sample_rate)
         self.nyquist = sample_rate / 2
 
-        # 设计滤波器
+        # Design filters
         self._design_highfreq_filter()
         self._design_lowfreq_filter()
 
-        # 从 DEFAULT_DSP_CONFIG 加载默认参数
+        # Load default parameters from DEFAULT_DSP_CONFIG
         self.highfreq_gain = DEFAULT_DSP_CONFIG["highfreq_gain"]
         self.lowfreq_gain = DEFAULT_DSP_CONFIG["lowfreq_gain"]
         self.use_spectral = DEFAULT_DSP_CONFIG["use_spectral"]
         self.use_compression = DEFAULT_DSP_CONFIG["use_compression"]
         self.use_stereo = DEFAULT_DSP_CONFIG["use_stereo"]
 
-        # 动态范围压缩参数
+        # Dynamic range compression parameters
         self.compressor_threshold = DEFAULT_DSP_CONFIG["compression_threshold"]
         self.compressor_ratio = DEFAULT_DSP_CONFIG["compression_ratio"]
         self.makeup_gain = DEFAULT_DSP_CONFIG["compression_makeup"]
 
-        # 立体声增强参数
+        # Stereo enhancement parameters
         self.stereo_width = DEFAULT_DSP_CONFIG["stereo_width"]
 
-        # 10 频段均衡器
+        # 10-band equalizer
         self.eq_enabled = DEFAULT_DSP_CONFIG["eq_enabled"]
         self.eq_gains = {}
         for freq in EQ_BANDS:
             self.eq_gains[f'eq_{freq}'] = DEFAULT_DSP_CONFIG[f'eq_{freq}']
 
-        # 构建 EQ 滤波器
+        # Build EQ filters
         self._build_eq_filters()
 
-        log("DSP", "scipy DSP 增强器已初始化")
+        log("DSP", "numpy DSP enhancer initialized (no scipy dependency)")
 
     def _design_highfreq_filter(self):
-        """设计高频增强滤波器"""
-        cutoff = 8000 / self.nyquist
-        if cutoff < 1.0:
-            self.highfreq_b, self.highfreq_a = signal.butter(2, cutoff, btype='high')
-        else:
-            self.highfreq_b, self.highfreq_a = None, None
+        """Design high frequency enhancement filter"""
+        self.highfreq_b, self.highfreq_a = _design_butterworth(
+            8000, self.sample_rate, btype='high', order=2
+        )
 
     def _design_lowfreq_filter(self):
-        """设计低频增强滤波器"""
-        cutoff = 200 / self.nyquist
-        if cutoff < 1.0:
-            self.lowfreq_b, self.lowfreq_a = signal.butter(2, cutoff, btype='low')
-        else:
-            self.lowfreq_b, self.lowfreq_a = None, None
+        """Design low frequency enhancement filter"""
+        self.lowfreq_b, self.lowfreq_a = _design_butterworth(
+            200, self.sample_rate, btype='low', order=2
+        )
 
     def _build_eq_filters(self):
-        """构建 10 频段 EQ 的滤波器系数"""
+        """Build 10-band EQ filter coefficients"""
         self.eq_filters = []
         for freq in EQ_BANDS:
             key = f'eq_{freq}'
@@ -114,43 +276,43 @@ class ScipyEnhancer(BaseEnhancer):
                     self.eq_filters.append(result)
 
     def apply_eq(self, audio: np.ndarray) -> np.ndarray:
-        """应用 10 频段均衡器"""
+        """Apply 10-band equalizer"""
         if not self.eq_enabled or not self.eq_filters:
             return audio
 
         result = audio.copy()
         for b, a in self.eq_filters:
             for ch in range(result.shape[1]):
-                result[:, ch] = signal.lfilter(b, a, result[:, ch])
+                result[:, ch] = _lfilter_fast(b, a, result[:, ch])
 
         return result
 
     def enhance_highfreq(self, audio: np.ndarray, gain: float) -> np.ndarray:
-        """高频增强"""
+        """High frequency enhancement"""
         if self.highfreq_b is None or gain <= 1.0:
             return audio
 
         enhanced = audio.copy()
         for ch in range(audio.shape[1]):
-            highfreq = signal.filtfilt(self.highfreq_b, self.highfreq_a, audio[:, ch])
+            highfreq = _filtfilt(self.highfreq_b, self.highfreq_a, audio[:, ch])
             enhanced[:, ch] = audio[:, ch] + highfreq * (gain - 1.0)
 
         return enhanced
 
     def enhance_lowfreq(self, audio: np.ndarray, gain: float) -> np.ndarray:
-        """低频增强"""
+        """Low frequency enhancement"""
         if self.lowfreq_b is None or gain <= 1.0:
             return audio
 
         enhanced = audio.copy()
         for ch in range(audio.shape[1]):
-            lowfreq = signal.filtfilt(self.lowfreq_b, self.lowfreq_a, audio[:, ch])
+            lowfreq = _filtfilt(self.lowfreq_b, self.lowfreq_a, audio[:, ch])
             enhanced[:, ch] = audio[:, ch] + lowfreq * (gain - 1.0)
 
         return enhanced
 
     def spectral_enhance(self, audio: np.ndarray, treble_gain: float, bass_gain: float) -> np.ndarray:
-        """频谱增强 - 在频域进行精细调整"""
+        """Spectral enhancement - fine adjustment in frequency domain"""
         enhanced = np.zeros_like(audio)
 
         for ch in range(audio.shape[1]):
@@ -159,15 +321,15 @@ class ScipyEnhancer(BaseEnhancer):
 
             gain_curve = np.ones_like(freqs)
 
-            # 低频增强 (0-250Hz)
+            # Low frequency enhancement (0-250Hz)
             bass_mask = freqs < 250
             gain_curve[bass_mask] = bass_gain
 
-            # 中频保持 (250Hz-4kHz)
+            # Mid frequency preservation (250Hz-4kHz)
             mid_mask = (freqs >= 250) & (freqs < 4000)
             gain_curve[mid_mask] = 1.0
 
-            # 高频增强 (4kHz+)
+            # High frequency enhancement (4kHz+)
             treble_mask = freqs >= 4000
             treble_freqs = freqs[treble_mask]
             if len(treble_freqs) > 0:
@@ -180,7 +342,7 @@ class ScipyEnhancer(BaseEnhancer):
         return enhanced
 
     def dynamic_range_compress(self, audio: np.ndarray) -> np.ndarray:
-        """动态范围压缩"""
+        """Dynamic range compression"""
         threshold = self.compressor_threshold
         ratio = self.compressor_ratio
         makeup = self.makeup_gain
@@ -198,7 +360,7 @@ class ScipyEnhancer(BaseEnhancer):
         return result
 
     def stereo_enhance(self, audio: np.ndarray) -> np.ndarray:
-        """立体声增强 - Mid-Side 处理"""
+        """Stereo enhancement - Mid-Side processing"""
         if audio.shape[1] != 2:
             return audio
 
@@ -216,13 +378,13 @@ class ScipyEnhancer(BaseEnhancer):
         return enhanced
 
     def enhance(self, audio: np.ndarray) -> np.ndarray:
-        """完整的 DSP 增强流程"""
+        """Complete DSP enhancement pipeline"""
         result = audio.astype(np.float32)
 
-        # 1. 10 频段均衡器
+        # 1. 10-band equalizer
         result = self.apply_eq(result)
 
-        # 2. 频谱/滤波器增强
+        # 2. Spectral/filter enhancement
         if self.use_spectral:
             result = self.spectral_enhance(result, self.highfreq_gain, self.lowfreq_gain)
         else:
@@ -231,18 +393,18 @@ class ScipyEnhancer(BaseEnhancer):
             if self.lowfreq_gain > 1.0:
                 result = self.enhance_lowfreq(result, self.lowfreq_gain)
 
-        # 3. 动态范围压缩
+        # 3. Dynamic range compression
         if self.use_compression:
             result = self.dynamic_range_compress(result)
 
-        # 4. 立体声增强
+        # 4. Stereo enhancement
         if self.use_stereo and audio.shape[1] == 2:
             result = self.stereo_enhance(result)
 
         return result.astype(np.float32)
 
     def set_params(self, **kwargs):
-        """设置增强参数"""
+        """Set enhancement parameters"""
         if 'highfreq_gain' in kwargs:
             self.highfreq_gain = kwargs['highfreq_gain']
         if 'lowfreq_gain' in kwargs:
@@ -262,7 +424,7 @@ class ScipyEnhancer(BaseEnhancer):
         if 'compression_makeup' in kwargs:
             self.makeup_gain = kwargs['compression_makeup']
 
-        # EQ 参数
+        # EQ parameters
         if 'eq_enabled' in kwargs:
             self.eq_enabled = kwargs['eq_enabled']
 
@@ -277,7 +439,7 @@ class ScipyEnhancer(BaseEnhancer):
             self._build_eq_filters()
 
     def get_params(self) -> dict:
-        """获取当前参数"""
+        """Get current parameters"""
         params = {
             'highfreq_gain': self.highfreq_gain,
             'lowfreq_gain': self.lowfreq_gain,
@@ -292,3 +454,7 @@ class ScipyEnhancer(BaseEnhancer):
         }
         params.update(self.eq_gains)
         return params
+
+
+# Alias for compatibility
+ScipyEnhancer = NumpyEnhancer
