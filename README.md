@@ -1,96 +1,63 @@
 # DLNA to AirPlay Bridge
 
-一个轻量级的 DLNA/UPnP 到 AirPlay 桥接服务，让任何 DLNA 客户端都能推送音频到 AirPlay 设备或本地扬声器。
+[English](README.md) | [中文](README_CN.md)
 
-## 特性
+---
 
-- 🎵 **DLNA 到 AirPlay 桥接** - 将 DLNA/UPnP 音频流转发到 AirPlay 设备（如 HomePod、Apple TV）
-- 🔊 **Server Speaker 支持** - 支持输出到服务器本地扬声器
-- 🎚️ **系统级音量控制** - 跨平台控制系统音量（Windows/Linux/macOS）
-- 🎛️ **DSP 音频增强** - 内置均衡器、压缩器、立体声增强等音频处理
-- 🌐 **Web 控制面板** - 友好的 Web 界面管理设备和 DSP 配置
-- 🔄 **自动设备发现** - 自动扫描并创建 AirPlay 虚拟设备
-- 📱 **多设备支持** - 同时支持多个 AirPlay 设备
+DLNA to AirPlay is an audio bridging tool. It forwards DLNA/UPnP audio streams to AirPlay devices or the server's local speakers, allowing Android devices or music apps that don't support AirPlay to push audio to AirPlay devices.
 
-## 系统要求
+This project integrates DSP (Digital Signal Processing) functionality for adjusting the output audio characteristics.
 
-- Python 3.10+
-- Windows/Linux/macOS
-- FFmpeg（用于音频解码）
+**Note:** Currently, this project has only been tested on HomePod (1st generation) devices and has not been fully tested on Sonos or other AirPlay brand devices.
 
-### 音量控制依赖
+## Features
 
-- **Windows**: pycaw + comtypes
-- **Linux**: amixer (alsa-utils)
-- **macOS**: osascript (系统自带)
+- **Protocol Bridging**: Push audio from DLNA clients to AirPlay devices.
+- **Local Output**: Support playing audio directly through the server's local sound card/speakers.
+- **Web Control Panel**: Access at `http://<server-ip>:6089`, supports playback status monitoring and DSP audio adjustments (EQ, spectral enhancement, stereo widening, etc.).
 
-## 快速开始
+## How to Use
 
-### 1. 安装依赖
+### 1. Deploy with Docker (Recommended)
+
+Clone the source code:
+
+```bash
+git clone https://github.com/noNu1L/dlan-to-airplay
+cd dlna-to-airplay/docker
+```
+
+Start the service:
+
+```bash
+docker-compose up -d
+```
+
+### 2. Run Locally
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 配置
-
-编辑 `config.py` 自定义配置：
-
-```python
-# 是否启用 Server Speaker（输出到本地扬声器）
-ENABLE_SERVER_SPEAKER = True
-
-# HTTP 服务端口
-HTTP_PORT = 6088
-WEB_PORT = 6089
-```
-
-### 3. 运行
+Run the project:
 
 ```bash
 python run.py
 ```
 
-服务启动后：
-- DLNA 服务：`http://<本机IP>:6088`
-- Web 控制面板：`http://<本机IP>:6089`
+## Configuration
 
-## 使用方法
+The project supports automatic discovery and configuration, usually ready to use upon startup.
 
-1. **启动服务** - 运行 `python run.py`
-2. **连接 DLNA 客户端** - 在 DLNA 客户端（如网易云音乐、Spotify）中选择虚拟设备
-3. **播放音乐** - 音频将自动转发到 AirPlay 设备或本地扬声器
-4. **调整设置** - 通过 Web 面板调整音量和 DSP 配置
+- **Auto Discovery**: After startup, the program will automatically scan for AirPlay devices on the local network and generate virtual DLNA devices with the suffix `[D]`.
+- **Server Speaker**: If the running environment has audio output capability, the program will generate a Server Speaker virtual bridge device by default.
+- **Modify Settings**: Edit the `config.py` file for custom adjustments:
+  - **Disable Local Playback**: Set `ENABLE_SERVER_SPEAKER = False` to disable the Server Speaker virtual device.
+  - **Port Settings**: You can modify the Web page and service ports in the configuration file.
 
-## 架构说明
+## FAQ
 
-本项目采用**事件驱动架构**：
-
-```
-DLNA 客户端 → DLNA Service → EventBus → VirtualDevice → Output (AirPlay/Speaker)
-```
-
-- **VirtualDevice** - 核心组件，管理设备状态和命令执行
-- **EventBus** - 事件总线，解耦组件间通信
-- **Output Layer** - 抽象输出层（AirPlay/ServerSpeaker）
-- **DSP Enhancer** - 可选的音频增强处理
-
-详细架构文档请参考 `docs/development_guide.md`
-
-## 支持的客户端
-
-- 网易云音乐（Android/iOS/Windows）
-- BubbleUPnP
-- Hi-Fi Cast
-- VLC Media Player
-- 其他支持 DLNA/UPnP 的播放器
-
-## 许可证
-
-MIT License
-
-## 致谢
-
-- [pyatv](https://github.com/postlund/pyatv) - AirPlay 协议实现
-- [pycaw](https://github.com/AndreMiras/pycaw) - Windows 音量控制
-- [sounddevice](https://python-sounddevice.readthedocs.io/) - 跨平台音频输出
+- **Software Compatibility**: Currently compatible with DLNA playback from NetEase Cloud Music, QQ Music, Kugou Music, Kuwo Music, and Migu Music. If media information shows as "None" on the Web page, it means the corresponding music software did not include that metadata when streaming.
+- **About Audio Quality**: Some Android music apps may have lower original stream quality when pushing from non-playback screens (i.e., non-direct URL push mode). In this case, enabling spectral enhancement in DSP can improve the listening experience to some extent.
