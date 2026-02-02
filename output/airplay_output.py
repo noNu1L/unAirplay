@@ -64,6 +64,9 @@ class AirPlayOutput(BaseOutput):
         self._stream_task: Optional[asyncio.Task] = None
         self._current_source: Optional[AirPlayFFmpegDspAudioSource] = None
 
+        # Lock to prevent concurrent stream operations
+        self._stream_lock = asyncio.Lock()
+
         # Audio settings
         self._sample_rate = SAMPLE_RATE
         self._channels = CHANNELS
@@ -140,25 +143,27 @@ class AirPlayOutput(BaseOutput):
             log_warning("AirPlayOutput", "Not connected")
             return False
 
-        await self._stop_current_stream()
+        # Use lock to prevent concurrent stream operations
+        async with self._stream_lock:
+            await self._stop_current_stream()
 
-        # Build mode description for logging
-        mode_parts = []
-        if seek_position > 0:
-            mode_parts.append(f"seek={seek_position}s")
-        if dsp_enabled:
-            mode_parts.append("DSP")
-        mode_info = f" ({', '.join(mode_parts)})" if mode_parts else ""
+            # Build mode description for logging
+            mode_parts = []
+            if seek_position > 0:
+                mode_parts.append(f"seek={seek_position}s")
+            if dsp_enabled:
+                mode_parts.append("DSP")
+            mode_info = f" ({', '.join(mode_parts)})" if mode_parts else ""
 
-        log_info("AirPlayOutput", f"Playing to: {self._device.device_name}{mode_info}")
-        log_debug("AirPlayOutput", f"URL: {url[:80]}...")
+            log_info("AirPlayOutput", f"Playing to: {self._device.device_name}{mode_info}")
+            log_debug("AirPlayOutput", f"URL: {url[:80]}...")
 
-        self._is_playing = True
+            self._is_playing = True
 
-        # Unified lossless playback
-        self._stream_task = asyncio.create_task(
-            self._stream_url_unified(url, seek_position, dsp_enabled, dsp_config)
-        )
+            # Unified lossless playback
+            self._stream_task = asyncio.create_task(
+                self._stream_url_unified(url, seek_position, dsp_enabled, dsp_config)
+            )
 
         return True
 
@@ -174,6 +179,9 @@ class AirPlayOutput(BaseOutput):
 
         Audio chain: URL -> FFmpeg PCM -> [Optional DSP] -> pyatv ALAC encode -> AirPlay
         """
+        playback_manager = None
+        takeover_release = None
+
         try:
             # Access pyatv internal components
             # FacadeStream wraps the actual RaopStream, we need to get the underlying instance
@@ -200,57 +208,49 @@ class AirPlayOutput(BaseOutput):
 
             takeover_release = core.takeover(Audio, Metadata, PushUpdater, RemoteControl)
 
-            try:
-                client, context = await playback_manager.setup(core.service)
-                context.credentials = extract_credentials(core.service)
-                context.password = core.service.password
+            client, context = await playback_manager.setup(core.service)
+            context.credentials = extract_credentials(core.service)
+            context.password = core.service.password
 
-                client.listener = raop_stream.listener
-                await client.initialize(core.service.properties)
+            client.listener = raop_stream.listener
+            await client.initialize(core.service.properties)
 
-                # Log pyatv context info
-                log_info("AirPlayOutput", f"pyatv context: sample_rate={context.sample_rate}, channels={context.channels}")
+            # Log pyatv context info
+            log_info("AirPlayOutput", f"pyatv context: sample_rate={context.sample_rate}, channels={context.channels}")
 
-                # Create AudioSource (with or without DSP)
-                # Pass device for live DSP config updates
-                self._current_source = AirPlayFFmpegDspAudioSource(
-                    url=url,
-                    seek_position=seek_position,
-                    sample_rate=context.sample_rate,
-                    channels=context.channels,
-                    enhancer=self._enhancer,  # Always pass enhancer for live DSP toggle
-                    dsp_config=dsp_config if dsp_enabled else None,
-                    device=self._device,  # For live DSP config updates
-                )
+            # Create AudioSource (with or without DSP)
+            # Pass device for live DSP config updates
+            self._current_source = AirPlayFFmpegDspAudioSource(
+                url=url,
+                seek_position=seek_position,
+                sample_rate=context.sample_rate,
+                channels=context.channels,
+                enhancer=self._enhancer,  # Always pass enhancer for live DSP toggle
+                dsp_config=dsp_config if dsp_enabled else None,
+                device=self._device,  # For live DSP config updates
+            )
 
-                log_debug("AirPlayOutput", f"Streaming (sample_rate={context.sample_rate}, channels={context.channels}, dsp={dsp_enabled})")
+            log_debug("AirPlayOutput", f"Streaming (sample_rate={context.sample_rate}, channels={context.channels}, dsp={dsp_enabled})")
 
-                # Get metadata
-                file_metadata = await self._current_source.get_metadata()
+            # Get metadata
+            file_metadata = await self._current_source.get_metadata()
 
-                # Handle volume
-                volume = None
-                if not raop_stream.audio.has_changed_volume and "initialVolume" in client.info:
-                    initial_volume = client.info["initialVolume"]
-                    if isinstance(initial_volume, float):
-                        context.volume = initial_volume
-                else:
-                    try:
-                        await raop_stream.audio.set_volume(raop_stream.audio.volume)
-                    except Exception:
-                        volume = raop_stream.audio.volume
+            # Handle volume
+            volume = None
+            if not raop_stream.audio.has_changed_volume and "initialVolume" in client.info:
+                initial_volume = client.info["initialVolume"]
+                if isinstance(initial_volume, float):
+                    context.volume = initial_volume
+            else:
+                try:
+                    await raop_stream.audio.set_volume(raop_stream.audio.volume)
+                except Exception:
+                    volume = raop_stream.audio.volume
 
-                # Send audio using our custom source
-                await client.send_audio(self._current_source, file_metadata, volume=volume)
+            # Send audio using our custom source
+            await client.send_audio(self._current_source, file_metadata, volume=volume)
 
-                log_info("AirPlayOutput", f"Stream completed: {self._device.device_name}")
-
-            finally:
-                takeover_release()
-                if self._current_source:
-                    await self._current_source.close()
-                    self._current_source = None
-                await playback_manager.teardown()
+            log_info("AirPlayOutput", f"Stream completed: {self._device.device_name}")
 
         except asyncio.CancelledError:
             log_debug("AirPlayOutput", "Stream cancelled")
@@ -259,10 +259,21 @@ class AirPlayOutput(BaseOutput):
             import traceback
             log_debug("AirPlayOutput", traceback.format_exc())
         finally:
+            # Always cleanup resources
+            if takeover_release:
+                takeover_release()
+            if self._current_source:
+                await self._current_source.close()
+                self._current_source = None
+            if playback_manager:
+                try:
+                    await playback_manager.teardown()
+                except Exception:
+                    pass
             self._is_playing = False
 
     async def _stop_current_stream(self):
-        """Stop current streaming task."""
+        """Stop current streaming task and wait for cleanup."""
         self._is_playing = False
 
         if self._stream_task:
@@ -271,11 +282,16 @@ class AirPlayOutput(BaseOutput):
                 await self._stream_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                pass
             self._stream_task = None
 
         if self._current_source:
             await self._current_source.close()
             self._current_source = None
+
+        # Small delay to ensure pyatv resources are fully released
+        await asyncio.sleep(0.1)
 
     async def stop(self):
         """Stop playback."""

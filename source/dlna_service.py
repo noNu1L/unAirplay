@@ -17,6 +17,34 @@ There are currently two DLNA implementation methods:
     这种会分离控制权,由FFmpeg独立播放,APP再获取播放进度,如果切换歌曲会重新发送url资源,音质比较好,绝大多数音质都能达到320kbps
 
 
+Example: NetEase Cloud Music (Android):
+1. External DLNA casting (Casting from outside the app interface):
+The app creates a local streaming source for FFmpeg to decode and play
+ -> CurrentURI: http://192.168.67.112:8080/upnp.flv.
+    Control: The app retains full control over the stream.
+    Audio Quality: Poor (less than 100kbps) with significant loss of high-frequency detail.
+    Solution: DSP (Digital Signal Processing) can be applied to enhance the listening experience.
+
+2. Internal DLNA casting (Casting from within the app interface):
+The app sends a direct network URL as the playback source
+-> CurrentURI: http://m701.music.126.net/xxx.mp3?xxx.
+    Control: Playback control is decoupled; FFmpeg handles streaming independently while the app syncs playback progress. A new URL is sent whenever the song changes.
+    Audio Quality: High (mostly up to 320kbps).
+
+
+DLNA属性值适配情况(安卓) 为 N 则说明客户端请求body不包含这些内容，则无法显示
+DLNA attribute value compatibility (Android) If it is set to N,
+ it indicates that the client's request body does not contain these contents, and thus cannot be displayed.
+
+        NetEase Cloud Music  | QQ Music |Kugou Music|Kuwo Music|Migu Music
+                    网易云音乐   QQ音乐      酷狗音乐      酷我音乐     咪咕音乐
+title                  Y        Y           Y           Y            Y
+album_match            Y        Y           N           N            N
+artist_match           Y        Y           Y           Y            N
+album_art_match        Y        Y           Y           Y            Y
+
+
+
 """
 import asyncio
 import re
@@ -480,6 +508,7 @@ class DLNAService:
         log_debug("AVTransport", f"Action: {action} from {req_ip} for {device.device_name}")
 
         if action == "SetAVTransportURI":
+            log_debug("SetAVTransportURI", f"body \n:{body}")
             match = re.search(r"<CurrentURI>([^<]*)</CurrentURI>", body)
             if match:
                 uri = self._decode_xml_entities(match.group(1))
@@ -526,10 +555,14 @@ class DLNAService:
             if match:
                 target = match.group(1)
                 position = device.parse_time(target)
-                log_info("Playback", f"Seek to {target}: {device.device_name}")
 
-                # Publish seek command event
-                event_bus.publish(cmd_seek(device.device_id, position))
+                # Filter: skip seek if position is same as current (Migu Music bug workaround)
+                if abs(position - device.get_current_position()) < 1.0:
+                    log_debug("Playback", f"Seek ignored (same position {position:.1f}s): {device.device_name}")
+                else:
+                    log_info("Playback", f"Seek to {target}: {device.device_name}")
+                    # Publish seek command event
+                    event_bus.publish(cmd_seek(device.device_id, position))
             response = soap_response("Seek", "AVTransport")
 
         # Some clients may frequently request this interface to obtain the playback progress,
@@ -661,11 +694,24 @@ class DLNAService:
 
     def _parse_metadata(self, device: "VirtualDevice", metadata: str):
         """Parse and update device metadata from DIDL-Lite"""
+        # Standard format: <tag>text</tag>
         title_match = re.search(r'<dc:title>([^<]+)</dc:title>', metadata)
-        artist_match = re.search(r'<upnp:artist>([^<]+)</upnp:artist>', metadata)
+        artist_match = re.search(r'<upnp:artist[^>]*>([^<]+)</upnp:artist>', metadata)
         album_match = re.search(r'<upnp:album>([^<]+)</upnp:album>', metadata)
         album_art_match = re.search(r'<upnp:albumArtURI>([^<]+)</upnp:albumArtURI>', metadata)
         duration_match = re.search(r'duration="([^"]+)"', metadata)
+
+        # Kugou CDATA format: <tag><![CDATA[text]]></tag>
+        if not title_match:
+            title_match = re.search(r'<dc:title><!\[CDATA\[([^\]]+)\]\]></dc:title>', metadata)
+        if not artist_match:
+            artist_match = re.search(r'<upnp:artist[^>]*><!\[CDATA\[([^\]]+)\]\]></upnp:artist>', metadata)
+        if not album_match:
+            album_match = re.search(r'<upnp:album><!\[CDATA\[([^\]]+)\]\]></upnp:album>', metadata)
+
+        # Kuwo format: uses <dc:creator> instead of <upnp:artist>
+        if not artist_match:
+            artist_match = re.search(r'<dc:creator>([^<]+)</dc:creator>', metadata)
 
         title = self._decode_xml_entities(title_match.group(1)) if title_match else "None"
         artist = self._decode_xml_entities(artist_match.group(1)) if artist_match else "None"
