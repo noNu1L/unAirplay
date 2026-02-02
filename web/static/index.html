@@ -411,6 +411,18 @@
         @media (max-width: 420px) {
             .item { max-width: 100%; }
             .cover-art { width: 60px; height: 60px; }
+            .modal {
+                width: 100%;
+                max-width: 100%;
+                border-radius: 0;
+                margin: 0;
+            }
+            .modal-overlay {
+                padding-top: 0;
+            }
+            .modal .section-title {
+                margin-top: 30px;
+            }
         }
     </style>
 </head>
@@ -437,7 +449,10 @@
                 <div class="item">
                     <div class="item-label">
                         <span>Enable DSP</span>
-                        <label class="switch"><input type="checkbox" id="dsp_enabled"><span class="sl"></span></label>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <label class="switch"><input type="checkbox" id="dsp_enabled"><span class="sl"></span></label>
+                            <button class="play-btn" style="background: #f5f5f5; color: var(--text); border: 1px solid var(--border-light); margin: 0; padding: 4px 10px; font-size: 0.7rem;" onclick="resetDsp()">Reset</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -503,11 +518,6 @@
                     <input type="range" id="stereo_width" min="0.5" max="2.0" step="0.1" value="1.2">
                 </div>
             </div>
-
-            <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
-                <button class="play-btn" style="background: #f5f5f5; color: var(--text); border: 1px solid var(--border-light);" onclick="resetDsp()">Reset</button>
-                <button class="play-btn" onclick="saveDsp()">Save &amp; Apply</button>
-            </div>
         </div>
     </div>
 
@@ -520,6 +530,13 @@
         let currentDspDeviceId = null;
         let pollTimer = null;
         let fetchCount = 0; // 调用计数器
+        let saveTimeout = null; // 防抖保存定时器
+
+        // Debounced save function
+        function debouncedSave() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => saveDsp(), 300);
+        }
 
         // EQ config
         const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -863,6 +880,7 @@
                 thumb.classList.remove('dragging');
                 document.removeEventListener('mousemove', onMouseMove);
                 document.removeEventListener('mouseup', onMouseUp);
+                debouncedSave();
             };
 
             // Touch support
@@ -881,8 +899,11 @@
             };
 
             const onTouchEnd = () => {
-                isDragging = false;
-                thumb.classList.remove('dragging');
+                if (isDragging) {
+                    isDragging = false;
+                    thumb.classList.remove('dragging');
+                    debouncedSave();
+                }
             };
 
             box.addEventListener('mousedown', onMouseDown);
@@ -894,6 +915,7 @@
             box.addEventListener('click', (e) => {
                 if (!isDragging) {
                     updateFromY(e.clientY);
+                    debouncedSave();
                 }
             });
         }
@@ -953,9 +975,25 @@
             setTimeout(() => el.className = 'toast', 2000);
         }
 
+        // Setup auto-save listeners for all DSP controls
+        function setupAutoSave() {
+            const modal = document.getElementById('dsp-modal');
+
+            // All checkboxes (switches)
+            modal.querySelectorAll('input[type="checkbox"]').forEach(el => {
+                el.addEventListener('change', debouncedSave);
+            });
+
+            // All range sliders
+            modal.querySelectorAll('input[type="range"]').forEach(el => {
+                el.addEventListener('input', debouncedSave);
+            });
+        }
+
         // Init
         document.addEventListener('DOMContentLoaded', () => {
             initEQ();
+            setupAutoSave();
             Object.keys(SLIDERS).forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', () => updateSliderVal(id));
