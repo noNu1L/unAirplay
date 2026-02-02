@@ -41,8 +41,8 @@ pip install -r requirements.txt
 ENABLE_SERVER_SPEAKER = True
 
 # HTTP 服务端口
-HTTP_PORT = 8088
-WEB_PORT = 8089
+HTTP_PORT = 6088
+WEB_PORT = 6089
 ```
 
 ### 3. 运行
@@ -52,8 +52,8 @@ python run.py
 ```
 
 服务启动后：
-- DLNA 服务：`http://<本机IP>:8088`
-- Web 控制面板：`http://<本机IP>:8089`
+- DLNA 服务：`http://<本机IP>:6088`
+- Web 控制面板：`http://<本机IP>:6089`
 
 ## 使用方法
 

@@ -9,8 +9,8 @@ APP_NAME = "DLNA to AirPlay"
 APP_VERSION = "1.0.0"
 
 # ================= Network Configuration =================
-HTTP_PORT = 8088
-WEB_PORT = 8089
+HTTP_PORT = 6088
+WEB_PORT = 6089
 
 SSDP_MULTICAST_ADDR = "239.255.255.250"
 SSDP_PORT = 1900
