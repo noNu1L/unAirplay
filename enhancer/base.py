@@ -4,11 +4,13 @@ Audio Enhancer Base Class
 from abc import ABC, abstractmethod
 import numpy as np
 
+from config import SAMPLE_RATE
+
 
 class BaseEnhancer(ABC):
     """Abstract base class for audio enhancers"""
 
-    def __init__(self, sample_rate: int = 48000):
+    def __init__(self, sample_rate: int = SAMPLE_RATE):
         self.sample_rate = sample_rate
 
     @abstractmethod

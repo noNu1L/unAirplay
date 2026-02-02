@@ -36,6 +36,7 @@ from core.events import (
     EventType, Event,
     cmd_play, cmd_stop, cmd_pause, cmd_seek, cmd_set_volume, cmd_set_mute
 )
+from core.ffprobe import probe_media, format_bitrate
 from config import LOCAL_IP, HTTP_PORT, SSDP_MULTICAST_ADDR, SSDP_PORT
 
 if TYPE_CHECKING:
@@ -493,6 +494,9 @@ class DLNAService:
                     metadata = self._decode_xml_entities(metadata_match.group(1))
                     self._parse_metadata(device, metadata)
 
+                # Probe media info asynchronously (non-blocking)
+                asyncio.create_task(self._probe_and_update_media_info(device, uri))
+
             response = soap_response("SetAVTransportURI", "AVTransport")
 
         elif action == "Play":
@@ -676,6 +680,26 @@ class DLNAService:
         device.play_duration = device.parse_time(duration_str)
 
         log_info("Metadata", f"\n\ttitle:  {title}\n\tartist: {artist}\n\talbum:  {album}\n\tduration: {duration_str}")
+
+    async def _probe_and_update_media_info(self, device: "VirtualDevice", url: str):
+        """
+        Probe media info using FFprobe and update device audio info.
+        This runs asynchronously to avoid blocking the DLNA response.
+        """
+        try:
+            media_info = await probe_media(url, timeout=10.0)
+            if media_info:
+                device.audio_format = media_info.get("codec", "")
+                device.audio_sample_rate = media_info.get("sample_rate", 0)
+                device.audio_channels = media_info.get("channels", 0)
+                device.audio_bitrate = format_bitrate(media_info.get("bitrate", 0))
+
+                log_info("MediaInfo", f"codec={device.audio_format}, "
+                         f"sample_rate={device.audio_sample_rate}Hz, "
+                         f"bitrate={device.audio_bitrate}, "
+                         f"channels={device.audio_channels}")
+        except Exception as e:
+            log_warning("MediaInfo", f"Failed to probe media: {e}")
 
     # ================= UPnP GENA Event Notifications =================
 

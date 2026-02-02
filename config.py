@@ -38,7 +38,7 @@ DEVICE_SUFFIX = "[D]"
 SERVER_SPEAKER_NAME = "Server Speaker"
 
 # ================= Audio Configuration =================
-SAMPLE_RATE = 48000          # Output sample rate (48000 for AirPlay compatibility)
+SAMPLE_RATE = 44100          # Output sample rate
 CHANNELS = 2                 # Number of channels
 CHUNK_DURATION_MS = 100      # Audio chunk duration in milliseconds
 BUFFER_SIZE = 10             # Audio buffer queue size

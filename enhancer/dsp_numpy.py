@@ -5,7 +5,7 @@ import numpy as np
 from numpy.fft import rfft, irfft, rfftfreq
 
 from core.utils import log
-from config import DEFAULT_DSP_CONFIG
+from config import DEFAULT_DSP_CONFIG, SAMPLE_RATE
 from .base import BaseEnhancer
 
 # 10-band equalizer frequencies (Hz)
@@ -218,7 +218,7 @@ class NumpyEnhancer(BaseEnhancer):
     - Spectral enhancement
     """
 
-    def __init__(self, sample_rate: int = 44100):
+    def __init__(self, sample_rate: int = SAMPLE_RATE):
         super().__init__(sample_rate)
         self.nyquist = sample_rate / 2
 
