@@ -1,6 +1,6 @@
 services:
   dlna-airplay-bridge:
-    build: .
+    build: ../..
     container_name: dlna-airplay-bridge
     restart: unless-stopped
 
@@ -27,6 +27,6 @@ services:
 
 # Note: Since network_mode: host is used, ports are not mapped here
 # The application will use:
-# - Port 8088: DLNA HTTP service
-# - Port 8089: Web control panel
+# - Port 6088: DLNA HTTP service
+# - Port 6089: Web control panel
 # - Port 1900/UDP: SSDP multicast (shared with other UPnP devices)
