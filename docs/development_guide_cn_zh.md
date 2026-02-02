@@ -400,47 +400,7 @@ def _create_output_for_device(self, device: VirtualDevice):
 
 ---
 
-## 八、当前架构合规性检查
-
-### 8.1 符合事件驱动模型 ✅
-
-- EventBus 已实现发布-订阅
-- 所有命令通过事件传递
-- VirtualDevice 订阅命令并执行
-- 状态变更通过事件通知
-
-### 8.2 符合职责分离 ✅
-
-- VirtualDevice 是唯一执行人
-- DeviceManager 只管理生命周期
-- 外部组件通过事件通信
-
-### 8.3 符合配置流程 ✅
-
-- ConfigStore 订阅 DSP_CHANGED 事件自动保存
-- WebServer 发布命令事件修改配置
-- 不存在直接调用保存的情况
-
-### 8.4 已实现功能
-
-#### ✅ 系统音量控制（已完成）
-
-**实现方案：**
-- Windows: 使用 `pycaw` (Windows Core Audio API)
-- Linux: 使用 `amixer` (ALSA)
-- macOS: 使用 `osascript` (AppleScript)
-
-**事件流：**
-```
-DLNA SetVolume → DLNAService 发布 CMD_SET_VOLUME
-→ VirtualDevice 订阅并执行
-→ VirtualDevice 调用 Output.set_volume()
-→ ServerSpeakerOutput 调用系统音量 API
-→ VirtualDevice 发布 VOLUME_CHANGED 事件
-```
----
-
-## 九、总结
+## 八、总结
 
 ### 核心原则
 
