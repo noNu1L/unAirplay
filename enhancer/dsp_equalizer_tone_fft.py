@@ -9,11 +9,12 @@ Features:
 - Combined gain curve: G_total = G_EQ × G_Spectral
 - Single FFT/IFFT pass for efficiency
 - Overlap-Add (OLA) architecture for streaming
+- Cubic spline interpolation for smooth EQ curves
 
 Architecture:
 - FFT size: 4096 (configurable)
 - Hop size: 50% overlap (Hann window COLA compliant)
-- Smooth gain curves with cosine interpolation
+- Smooth gain curves with cubic spline interpolation
 
 """
 import numpy as np
@@ -28,6 +29,109 @@ EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 # FFT Configuration
 FFT_SIZE = 4096
 HOP_SIZE = 2048  # 50% overlap
+
+
+def cubic_spline_interpolate(x_points, y_points, x_new):
+    """
+    Natural Cubic Spline Interpolation (pure numpy implementation)
+
+    Creates smooth curves through control points with continuous
+    first and second derivatives.
+
+    Args:
+        x_points: Control point x coordinates (sorted, ascending)
+        y_points: Control point y values
+        x_new: New x coordinates to interpolate
+
+    Returns:
+        Interpolated y values at x_new positions
+    """
+    n = len(x_points)
+    if n < 2:
+        return np.ones_like(x_new) * y_points[0] if n == 1 else np.ones_like(x_new)
+
+    # For only 2 points, use linear interpolation
+    if n == 2:
+        return np.interp(x_new, x_points, y_points)
+
+    # Step 1: Calculate intervals
+    h = np.diff(x_points)
+
+    # Step 2: Build tridiagonal system for second derivatives
+    # Natural spline: M[0] = M[n-1] = 0
+    # System: h[i-1]*M[i-1] + 2*(h[i-1]+h[i])*M[i] + h[i]*M[i+1] = 6*((y[i+1]-y[i])/h[i] - (y[i]-y[i-1])/h[i-1])
+
+    # Build right-hand side
+    dy = np.diff(y_points)
+    slopes = dy / h
+
+    # For interior points (1 to n-2)
+    rhs = 6 * np.diff(slopes)
+
+    # Build tridiagonal matrix coefficients
+    n_interior = n - 2
+    if n_interior > 0:
+        # Diagonal
+        diag = 2 * (h[:-1] + h[1:])
+        # Sub-diagonal and super-diagonal
+        off_diag_lower = h[1:-1] if n_interior > 1 else np.array([])
+        off_diag_upper = h[1:-1] if n_interior > 1 else np.array([])
+
+        # Solve tridiagonal system using Thomas algorithm
+        M = np.zeros(n)
+        if n_interior == 1:
+            M[1] = rhs[0] / diag[0]
+        else:
+            # Thomas algorithm
+            c_prime = np.zeros(n_interior)
+            d_prime = np.zeros(n_interior)
+
+            c_prime[0] = h[1] / diag[0]
+            d_prime[0] = rhs[0] / diag[0]
+
+            for i in range(1, n_interior):
+                denom = diag[i] - h[i] * c_prime[i-1]
+                if i < n_interior - 1:
+                    c_prime[i] = h[i+1] / denom
+                d_prime[i] = (rhs[i] - h[i] * d_prime[i-1]) / denom
+
+            # Back substitution
+            M[n-2] = d_prime[n_interior-1]
+            for i in range(n_interior - 2, -1, -1):
+                M[i+1] = d_prime[i] - c_prime[i] * M[i+2]
+    else:
+        M = np.zeros(n)
+
+    # Step 3: Evaluate spline at new points
+    y_new = np.zeros_like(x_new)
+
+    for i in range(len(x_new)):
+        x = x_new[i]
+
+        # Find interval (clamp to valid range)
+        if x <= x_points[0]:
+            y_new[i] = y_points[0]
+            continue
+        if x >= x_points[-1]:
+            y_new[i] = y_points[-1]
+            continue
+
+        # Binary search for interval
+        j = np.searchsorted(x_points, x) - 1
+        j = max(0, min(j, n - 2))
+
+        # Evaluate cubic polynomial
+        dx = x - x_points[j]
+        h_j = h[j]
+
+        # Cubic spline formula
+        A = (x_points[j+1] - x) / h_j
+        B = dx / h_j
+
+        y_new[i] = (A * y_points[j] + B * y_points[j+1] +
+                   ((A**3 - A) * M[j] + (B**3 - B) * M[j+1]) * (h_j**2) / 6)
+
+    return y_new
 
 
 class EqualizerToneFTT:
@@ -100,7 +204,8 @@ class EqualizerToneFTT:
         """
         Build EQ gain curve from 10-band settings
 
-        Uses log-frequency interpolation for smooth curve.
+        Uses cubic spline interpolation in log-frequency domain
+        for smooth, natural-sounding EQ curves.
 
         Returns:
             EQ gain curve (linear scale)
@@ -114,7 +219,6 @@ class EqualizerToneFTT:
 
         freqs = self._freqs
         n_freqs = len(freqs)
-        eq_curve = np.ones(n_freqs)
 
         # Convert EQ bands to arrays
         eq_freqs = np.array(EQ_BANDS)
@@ -125,12 +229,12 @@ class EqualizerToneFTT:
         eq_freqs_ext = np.concatenate([[1], eq_freqs, [self.nyquist]])
         eq_gains_ext = np.concatenate([[1.0], eq_gains_linear, [eq_gains_linear[-1]]])
 
-        # Log-frequency interpolation
+        # Log-frequency domain for perceptually uniform spacing
         log_eq_freqs = np.log10(eq_freqs_ext)
         log_target_freqs = np.log10(np.maximum(freqs, 1))
 
-        # Linear interpolation in log-frequency domain
-        eq_curve = np.interp(log_target_freqs, log_eq_freqs, eq_gains_ext)
+        # Cubic spline interpolation for smooth curves
+        eq_curve = cubic_spline_interpolate(log_eq_freqs, eq_gains_ext, log_target_freqs)
 
         # Ensure DC is unity
         eq_curve[0] = 1.0

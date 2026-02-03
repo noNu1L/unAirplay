@@ -10,6 +10,7 @@ Features:
 - Single FIR filter for efficiency
 - Linear phase (no phase distortion)
 - Stateful processing for streaming
+- Cubic spline interpolation for smooth EQ curves
 
 Architecture:
 - Frequency sampling method for FIR design
@@ -27,7 +28,94 @@ from config import SAMPLE_RATE
 EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
 # FIR Configuration
-FIR_NUMTAPS = 1025  # Odd number for Type I linear phase
+FIR_NUMTAPS = 4096  # Odd number for Type I linear phase
+
+
+def cubic_spline_interpolate(x_points, y_points, x_new):
+    """
+    Natural Cubic Spline Interpolation (pure numpy implementation)
+
+    Creates smooth curves through control points with continuous
+    first and second derivatives.
+
+    Args:
+        x_points: Control point x coordinates (sorted, ascending)
+        y_points: Control point y values
+        x_new: New x coordinates to interpolate
+
+    Returns:
+        Interpolated y values at x_new positions
+    """
+    n = len(x_points)
+    if n < 2:
+        return np.ones_like(x_new) * y_points[0] if n == 1 else np.ones_like(x_new)
+
+    # For only 2 points, use linear interpolation
+    if n == 2:
+        return np.interp(x_new, x_points, y_points)
+
+    # Step 1: Calculate intervals
+    h = np.diff(x_points)
+
+    # Step 2: Build tridiagonal system for second derivatives
+    dy = np.diff(y_points)
+    slopes = dy / h
+    rhs = 6 * np.diff(slopes)
+
+    # Build tridiagonal matrix coefficients
+    n_interior = n - 2
+    if n_interior > 0:
+        diag = 2 * (h[:-1] + h[1:])
+
+        # Solve tridiagonal system using Thomas algorithm
+        M = np.zeros(n)
+        if n_interior == 1:
+            M[1] = rhs[0] / diag[0]
+        else:
+            c_prime = np.zeros(n_interior)
+            d_prime = np.zeros(n_interior)
+
+            c_prime[0] = h[1] / diag[0]
+            d_prime[0] = rhs[0] / diag[0]
+
+            for i in range(1, n_interior):
+                denom = diag[i] - h[i] * c_prime[i-1]
+                if i < n_interior - 1:
+                    c_prime[i] = h[i+1] / denom
+                d_prime[i] = (rhs[i] - h[i] * d_prime[i-1]) / denom
+
+            M[n-2] = d_prime[n_interior-1]
+            for i in range(n_interior - 2, -1, -1):
+                M[i+1] = d_prime[i] - c_prime[i] * M[i+2]
+    else:
+        M = np.zeros(n)
+
+    # Step 3: Evaluate spline at new points
+    y_new = np.zeros_like(x_new)
+
+    for i in range(len(x_new)):
+        x = x_new[i]
+
+        if x <= x_points[0]:
+            y_new[i] = y_points[0]
+            continue
+        if x >= x_points[-1]:
+            y_new[i] = y_points[-1]
+            continue
+
+        j = np.searchsorted(x_points, x) - 1
+        j = max(0, min(j, n - 2))
+
+        dx = x - x_points[j]
+        h_j = h[j]
+
+        A = (x_points[j+1] - x) / h_j
+        B = dx / h_j
+
+        y_new[i] = (A * y_points[j] + B * y_points[j+1] +
+                   ((A**3 - A) * M[j] + (B**3 - B) * M[j+1]) * (h_j**2) / 6)
+
+    return y_new
 
 
 class EqualizerToneFIR:
@@ -94,6 +182,9 @@ class EqualizerToneFIR:
         """
         Build EQ frequency response
 
+        Uses cubic spline interpolation in log-frequency domain
+        for smooth, natural-sounding EQ curves.
+
         Args:
             n_freqs: Number of frequency points
 
@@ -107,7 +198,6 @@ class EqualizerToneFIR:
             return np.ones(n_freqs)
 
         freqs = np.linspace(0, self.nyquist, n_freqs)
-        eq_response = np.ones(n_freqs)
 
         # Convert EQ bands to arrays
         eq_freqs = np.array(EQ_BANDS)
@@ -118,11 +208,12 @@ class EqualizerToneFIR:
         eq_freqs_ext = np.concatenate([[1], eq_freqs, [self.nyquist]])
         eq_gains_ext = np.concatenate([[1.0], eq_gains_linear, [eq_gains_linear[-1]]])
 
-        # Log-frequency interpolation
+        # Log-frequency domain for perceptually uniform spacing
         log_eq_freqs = np.log10(eq_freqs_ext)
         log_target_freqs = np.log10(np.maximum(freqs, 1))
 
-        eq_response = np.interp(log_target_freqs, log_eq_freqs, eq_gains_ext)
+        # Cubic spline interpolation for smooth curves
+        eq_response = cubic_spline_interpolate(log_eq_freqs, eq_gains_ext, log_target_freqs)
         eq_response[0] = 1.0
 
         return eq_response
