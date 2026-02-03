@@ -153,6 +153,16 @@ class ServerSpeakerOutput:
                 data = self._decoder_process.stdout.read(self._chunk_bytes)
                 if not data:
                     log_info("ServerSpeaker", f"Decoder stream ended: {device_name}")
+                    # Notify playback completed
+                    try:
+                        if self._event_loop and self._event_loop.is_running():
+                            self._device.play_state = "STOPPED"
+                            asyncio.run_coroutine_threadsafe(
+                                event_bus.publish_async(state_changed(self._device.device_id, state="STOPPED")),
+                                self._event_loop
+                            )
+                    except Exception as e:
+                        log_error("ServerSpeaker", f"Failed to notify playback completed: {e}")
                     break
 
                 if not first_data_received:

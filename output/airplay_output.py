@@ -15,6 +15,8 @@ from pyatv.const import Protocol
 from pyatv.interface import MediaMetadata
 
 from core.utils import log_info, log_debug, log_warning, log_error
+from core.event_bus import event_bus
+from core.events import state_changed
 from config import SAMPLE_RATE, CHANNELS, AIRPLAY_SCAN_TIMEOUT
 from .base import BaseOutput
 from .airplay_ffmpeg_dsp_source import AirPlayFFmpegDspAudioSource
@@ -251,6 +253,10 @@ class AirPlayOutput(BaseOutput):
             await client.send_audio(self._current_source, file_metadata, volume=volume)
 
             log_info("AirPlayOutput", f"Stream completed: {self._device.device_name}")
+
+            # Notify playback completed
+            self._device.play_state = "STOPPED"
+            await event_bus.publish_async(state_changed(self._device.device_id, state="STOPPED"))
 
         except asyncio.CancelledError:
             log_debug("AirPlayOutput", "Stream cancelled")
