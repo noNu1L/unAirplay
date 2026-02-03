@@ -404,6 +404,60 @@
             transform: translateX(16px);
         }
 
+        /* Radio Buttons */
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0px;
+        }
+        .radio-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 8px 10px;
+            border-radius: 6px;
+            transition: background 0.2s;
+            font-size: 0.8rem;
+        }
+        .radio-label:hover {
+            background: rgba(64,158,255,0.05);
+        }
+        .radio-label input[type="radio"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #dcdfe6;
+            border-radius: 50%;
+            margin-right: 10px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .radio-label input[type="radio"]:hover {
+            border-color: var(--accent);
+        }
+        .radio-label input[type="radio"]:checked {
+            border-color: var(--accent);
+            background: var(--accent);
+        }
+        .radio-label input[type="radio"]:checked::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #fff;
+        }
+        .radio-label span {
+            color: var(--text);
+            line-height: 1.4;
+        }
+
         /* EQ */
         .eq-container {
             display: flex;
@@ -559,39 +613,57 @@
                 </div>
             </div>
 
-            <!-- Equalizer -->
+            <!-- Equalizer & Tone (Unified Section) -->
             <div class="section-header">
-                <span class="section-title">Equalizer</span>
+                <span class="section-title">Equalizer & Tone</span>
                 <label class="switch"><input type="checkbox" id="eq_enabled" checked><span class="sl"></span></label>
             </div>
-            <div class="section-content eq-container-wrapper">
-                <div class="eq-container" id="eq_container">
+
+            <div class="section-content" id="eq-tone-content">
+                <!-- Mode Selector -->
+                <div style="padding-bottom: 12px; border-bottom: 1px solid var(--border-light); margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Mode:</span>
+                        <div class="radio-group" style="flex-direction: row; gap: 8px;">
+                            <label class="radio-label" style="padding: 4px 12px; font-size: 0.75rem;">
+                                <input type="radio" name="spectral_mode" value="iir">
+                                <span>IIR</span>
+                            </label>
+                            <label class="radio-label" style="padding: 4px 12px; font-size: 0.75rem;">
+                                <input type="radio" name="spectral_mode" value="fft" checked>
+                                <span>FFT</span>
+                            </label>
+                            <label class="radio-label" style="padding: 4px 12px; font-size: 0.75rem;">
+                                <input type="radio" name="spectral_mode" value="fir">
+                                <span>FIR</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- EQ Sliders -->
+                <div class="eq-container-wrapper">
+                    <div class="eq-container" id="eq_container">
+                    </div>
+                </div>
+
+                <!-- Spectral Enhancement Controls -->
+                <div style="border-top: 1px solid var(--border-light); padding-top: 16px; margin-top: 12px;">
+                    <div class="setting-row">
+                        <div class="setting-item">
+                            <div class="item-label"><span>High Freq Gain</span><span class="val" id="highfreq_gain_v">1.3x</span></div>
+                            <input type="range" id="highfreq_gain" min="0.5" max="2.0" step="0.1" value="1.3"/>
+                        </div>
+                        <div class="setting-item">
+                            <div class="item-label"><span>Low Freq Gain</span><span class="val" id="lowfreq_gain_v">1.2x</span></div>
+                            <input type="range" id="lowfreq_gain" min="0.5" max="2.0" step="0.1" value="1.2">
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Spectral Enhancement -->
-            <div class="section-header">
-                <span class="section-title">Spectral Enhancement</span>
-                <label class="switch"><input type="checkbox" id="spectral_enabled" checked><span class="sl"></span></label>
-            </div>
-            <div class="section-content" data-section="spectral">
-                <div class="setting-row">
-                    <div class="setting-item">
-                        <div class="item-label" style="margin-bottom: 0;">
-                            <span>FFT Spectral</span>
-                            <label class="switch"><input type="checkbox" id="use_spectral" checked><span class="sl"></span></label>
-                        </div>
-                    </div>
-                    <div class="setting-item">
-                        <div class="item-label"><span>High Freq Gain</span><span class="val" id="highfreq_gain_v">1.3x</span></div>
-                        <input type="range" id="highfreq_gain" min="0.5" max="2.0" step="0.1" value="1.3"/>
-                    </div>
-                    <div class="setting-item">
-                        <div class="item-label"><span>Low Freq Gain</span><span class="val" id="lowfreq_gain_v">1.2x</span></div>
-                        <input type="range" id="lowfreq_gain" min="0.5" max="2.0" step="0.1" value="1.2">
-                    </div>
-                </div>
-            </div>
+            <!-- Hidden checkbox for spectral_enabled (always enabled when eq_enabled is on) -->
+            <input type="checkbox" id="spectral_enabled" checked style="display: none;">
 
             <!-- Dynamic Compression -->
             <div class="section-header">
@@ -827,10 +899,16 @@
             const cfg = device.dsp_config || {};
             document.getElementById('dsp_enabled').checked = device.dsp_enabled;
 
-            ['eq_enabled', 'spectral_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
+            ['eq_enabled', 'spectral_enabled', 'use_compression', 'use_stereo'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el && cfg[id] !== undefined) el.checked = cfg[id];
             });
+
+            // Handle spectral_mode radio buttons
+            if (cfg.spectral_mode) {
+                const radioBtn = document.querySelector(`input[name="spectral_mode"][value="${cfg.spectral_mode}"]`);
+                if (radioBtn) radioBtn.checked = true;
+            }
 
             Object.keys(SLIDERS).forEach(id => {
                 const el = document.getElementById(id);
@@ -869,10 +947,17 @@
             if (!currentDspDeviceId) return;
 
             const config = {};
-            ['eq_enabled', 'spectral_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
+            ['eq_enabled', 'spectral_enabled', 'use_compression', 'use_stereo'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) config[id] = el.checked;
             });
+
+            // Get spectral_mode from radio buttons
+            const spectralModeRadio = document.querySelector('input[name="spectral_mode"]:checked');
+            if (spectralModeRadio) {
+                config.spectral_mode = spectralModeRadio.value;
+            }
+
             Object.keys(SLIDERS).forEach(id => {
                 const el = document.getElementById(id);
                 if (el) config[id] = parseFloat(el.value);
@@ -1134,7 +1219,7 @@
                 { id: 'spectral_enabled', selector: '[data-section="spectral"]' },
                 { id: 'use_compression', selector: '[data-section="compression"]' },
                 { id: 'use_stereo', selector: '[data-section="stereo"]' },
-                { id: 'eq_enabled', selector: '#eq_container' }
+                { id: 'eq_enabled', selector: '#eq-tone-content' }
             ];
 
             sectionToggles.forEach(({ id, selector }) => {
@@ -1167,6 +1252,11 @@
             // All range sliders
             modal.querySelectorAll('input[type="range"]').forEach(el => {
                 el.addEventListener('input', debouncedSave);
+            });
+
+            // Radio buttons (spectral_mode)
+            modal.querySelectorAll('input[type="radio"][name="spectral_mode"]').forEach(el => {
+                el.addEventListener('change', debouncedSave);
             });
         }
 

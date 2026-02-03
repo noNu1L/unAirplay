@@ -1,5 +1,10 @@
 """
 Pure numpy DSP Audio Enhancer (no scipy dependency)
+
+=== 已弃用 - 请勿使用 ===
+
+此文件已弃用，仅保留作为参考。
+
 """
 import numpy as np
 from numpy.fft import rfft, irfft, rfftfreq
