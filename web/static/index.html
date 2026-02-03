@@ -905,9 +905,16 @@
                 return;
             }
 
+            // Sort devices: playing devices first
+            const sortedDevices = [...devices].sort((a, b) => {
+                const aPlaying = a.play_state === 'PLAYING' ? 1 : 0;
+                const bPlaying = b.play_state === 'PLAYING' ? 1 : 0;
+                return bPlaying - aPlaying;
+            });
+
             if (forceRender) {
                 // Full re-render
-                container.innerHTML = devices.map(renderDeviceCard).join('');
+                container.innerHTML = sortedDevices.map(renderDeviceCard).join('');
             } else {
                 // Smart update: only update changed devices
                 devices.forEach((device, index) => {
@@ -939,7 +946,14 @@
                 const data = await r.json();
                 oldDevices = devices.slice();
                 devices = data;
-                const forceRender = oldDevices.length === 0 || oldDevices.length !== devices.length || force;
+
+                // Check if play state changed (for re-sorting)
+                const playStateChanged = devices.some(d => {
+                    const old = oldDevices.find(o => o.device_id === d.device_id);
+                    return old && old.play_state !== d.play_state;
+                });
+
+                const forceRender = oldDevices.length === 0 || oldDevices.length !== devices.length || playStateChanged || force;
                 renderDevices(forceRender);
             } catch (e) {
                 console.error('Failed to fetch devices:', e);
