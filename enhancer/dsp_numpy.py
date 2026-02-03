@@ -227,6 +227,7 @@ class NumpyEnhancer(BaseEnhancer):
         self._design_lowfreq_filter()
 
         # Load default parameters from DEFAULT_DSP_CONFIG
+        self.spectral_enabled = DEFAULT_DSP_CONFIG["spectral_enabled"]
         self.highfreq_gain = DEFAULT_DSP_CONFIG["highfreq_gain"]
         self.lowfreq_gain = DEFAULT_DSP_CONFIG["lowfreq_gain"]
         self.use_spectral = DEFAULT_DSP_CONFIG["use_spectral"]
@@ -288,8 +289,8 @@ class NumpyEnhancer(BaseEnhancer):
         return result
 
     def enhance_highfreq(self, audio: np.ndarray, gain: float) -> np.ndarray:
-        """High frequency enhancement"""
-        if self.highfreq_b is None or gain <= 1.0:
+        """High frequency enhancement/attenuation (0.5-2.0)"""
+        if self.highfreq_b is None or gain == 1.0:
             return audio
 
         enhanced = audio.copy()
@@ -300,8 +301,8 @@ class NumpyEnhancer(BaseEnhancer):
         return enhanced
 
     def enhance_lowfreq(self, audio: np.ndarray, gain: float) -> np.ndarray:
-        """Low frequency enhancement"""
-        if self.lowfreq_b is None or gain <= 1.0:
+        """Low frequency enhancement/attenuation (0.5-2.0)"""
+        if self.lowfreq_b is None or gain == 1.0:
             return audio
 
         enhanced = audio.copy()
@@ -385,13 +386,17 @@ class NumpyEnhancer(BaseEnhancer):
         result = self.apply_eq(result)
 
         # 2. Spectral/filter enhancement
-        if self.use_spectral:
-            result = self.spectral_enhance(result, self.highfreq_gain, self.lowfreq_gain)
-        else:
-            if self.highfreq_gain > 1.0:
-                result = self.enhance_highfreq(result, self.highfreq_gain)
-            if self.lowfreq_gain > 1.0:
-                result = self.enhance_lowfreq(result, self.lowfreq_gain)
+        if self.spectral_enabled:
+            if self.use_spectral:
+                # FFT-based spectral enhancement (more precise, no phase distortion)
+                result = self.spectral_enhance(result, self.highfreq_gain, self.lowfreq_gain)
+            else:
+                # IIR filter-based enhancement (faster, more dynamic)
+                if self.highfreq_gain != 1.0:
+                    result = self.enhance_highfreq(result, self.highfreq_gain)
+                if self.lowfreq_gain != 1.0:
+                    result = self.enhance_lowfreq(result, self.lowfreq_gain)
+
 
         # 3. Dynamic range compression
         if self.use_compression:
@@ -405,6 +410,8 @@ class NumpyEnhancer(BaseEnhancer):
 
     def set_params(self, **kwargs):
         """Set enhancement parameters"""
+        if 'spectral_enabled' in kwargs:
+            self.spectral_enabled = kwargs['spectral_enabled']
         if 'highfreq_gain' in kwargs:
             self.highfreq_gain = kwargs['highfreq_gain']
         if 'lowfreq_gain' in kwargs:
@@ -441,6 +448,7 @@ class NumpyEnhancer(BaseEnhancer):
     def get_params(self) -> dict:
         """Get current parameters"""
         params = {
+            'spectral_enabled': self.spectral_enabled,
             'highfreq_gain': self.highfreq_gain,
             'lowfreq_gain': self.lowfreq_gain,
             'use_spectral': self.use_spectral,

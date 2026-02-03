@@ -3,11 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DLNA to AirPlay</title>
+    <title>unAirplay</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        html {
+            overflow-x: hidden;
+        }
+        body {
+            overflow-x: hidden;
+        }
         :root {
-            /* 参考 SensorHub 的浅色主题 */
             --bg: #ffffff;
             --card: #ffffff;
             --border: #444444;
@@ -22,24 +27,23 @@
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #f3f3f3;
+            background: #ffffff;
             min-height: 100vh;
             color: var(--text);
         }
 
         /* Header */
         .header {
-            background: var(--card);
-            border-bottom: 1px solid var(--border-light);
-            padding: 16px 20px;
-            text-align: center;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            max-width: 900px;
+            margin: 0 auto 0 auto;
+            padding: 0 16px;
         }
         .header h1 {
-            font-size: 1rem;
+            font-size: 1.5rem;
             font-weight: 500;
             letter-spacing: 1px;
             color: var(--text);
+            padding: 16px 0;
         }
 
         /* Container */
@@ -51,16 +55,15 @@
 
         /* Device Card */
         .device-card {
-            background: var(--card);
-            border: 2px solid var(--border-light);
+            background: #f8f8f8;
+            border: 1px solid var(--border-light);
             border-radius: 8px;
-            padding: 16px;
+            padding: 10px;
             margin-bottom: 14px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            transition: all 0.2s;
         }
         .device-card.playing {
-            border-color: #cccccc;
-            box-shadow: 0 2px 8px rgba(64,158,255,0.15);
+            border-color: var(--accent);
         }
         .device-card.disconnected {
             opacity: 0.5;
@@ -98,7 +101,7 @@
         /* Now Playing */
         .now-playing {
             display: flex;
-            gap: 14px;
+            gap: 10px;
             align-items: flex-start;
         }
         .cover-art {
@@ -106,7 +109,7 @@
             height: 72px;
             border-radius: 8px;
             background: #f5f5f5;
-            border: 1px solid var(--border-light);
+            /*border: 1px solid var(--border-light);*/
             flex-shrink: 0;
             overflow: hidden;
             display: flex;
@@ -126,12 +129,6 @@
         .track-info {
             flex: 1;
             min-width: 0;
-        }
-        .track-info-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 8px;
         }
         .track-title {
             font-size: 0.95rem;
@@ -157,23 +154,22 @@
         /* DSP Button */
         .dsp-btn {
             flex-shrink: 0;
-            padding: 4px 10px;
-            border-radius: 6px;
+            padding: 2px 8px;
+            border-radius: 10px;
             border: 1px solid var(--border-light);
-            background: #ffffff;
+            background: #f5f5f5;
             color: var(--text-dim);
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             cursor: pointer;
             transition: all 0.2s;
         }
         .dsp-btn.active {
-            background: rgba(64,158,255,0.1);
-            border-color: var(--accent);
+            background: rgba(64,158,255,0.15);
+            border-color: rgba(64,158,255,0.3);
             color: var(--accent);
         }
         .dsp-btn:hover {
-            background: var(--hover-bg);
-            border-color: var(--accent);
+            opacity: 0.8;
         }
 
         /* Progress Bar */
@@ -192,6 +188,7 @@
             background: var(--accent);
             border-radius: 2px;
             width: 0%;
+            transition: width 0.3s ease;
         }
         .progress-time {
             display: flex;
@@ -272,28 +269,67 @@
         }
 
         /* DSP Controls */
-        .section-title {
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 16px 0 8px;
+        }
+        .section-header .section-title {
             font-size: 0.7rem;
             color: var(--text-dim);
             text-transform: uppercase;
             letter-spacing: 1px;
-            margin: 10px 0 6px;
+            margin: 0;
         }
-        .grid {
+        .section-content {
+            background: #f8f8f8;
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            transition: opacity 0.2s, filter 0.2s;
+        }
+        /* Disabled states */
+        .section-content.disabled,
+        .eq-container.disabled,
+        .dsp-section-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            filter: grayscale(0.5);
+            transition: opacity 0.2s, filter 0.2s;
+        }
+
+        /* Grid layouts */
+        .grid, .setting-row {
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
+        }
+
+        /* Items */
+        .item, .setting-item {
+            padding: 8px 10px;
+            min-width: 160px;
+            flex: 1 1 160px;
+            max-width: calc(50% - 4px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         .item {
             background: #f8f8f8;
             border: 1px solid var(--border-light);
             border-radius: 8px;
-            padding: 8px 10px;
-            min-width: 160px;
-            flex: 1 1 160px;
-            max-width: calc(50% - 4px);
         }
-        .item-wide { flex: 1 1 100%; max-width: 100%; }
+        .setting-item {
+            background: transparent;
+            border: none;
+        }
+        .item-wide, .setting-item-wide {
+            flex: 1 1 100%;
+            max-width: 100%;
+        }
         .item-label {
             font-size: 0.75rem;
             color: var(--text-dim);
@@ -301,8 +337,13 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            min-height: 20px;
         }
-        .item-label .val { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
+        .item-label .val {
+            color: var(--accent);
+            font-weight: 600;
+            font-size: 0.8rem;
+        }
 
         input[type="range"] {
             width: 100%;
@@ -323,19 +364,45 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
 
-        .switch { position: relative; width: 36px; height: 20px; flex-shrink: 0; display: inline-block; }
-        .switch input { opacity: 0; width: 0; height: 0; }
+        /* Switch */
+        .switch {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            flex-shrink: 0;
+            display: inline-block;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
         .switch .sl {
-            position: absolute; cursor: pointer; inset: 0;
-            background: #dcdfe6; transition: .2s; border-radius: 20px;
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: #dcdfe6;
+            transition: .2s;
+            border-radius: 20px;
         }
         .switch .sl:before {
-            position: absolute; content: ""; height: 14px; width: 14px;
-            left: 3px; bottom: 3px; background: #fff; transition: .2s; border-radius: 50%;
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background: #fff;
+            transition: .2s;
+            border-radius: 50%;
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
-        .switch input:checked + .sl { background: var(--accent); }
-        .switch input:checked + .sl:before { transform: translateX(16px); }
+        .switch input:checked + .sl {
+            background: var(--accent);
+        }
+        .switch input:checked + .sl:before {
+            transform: translateX(16px);
+        }
 
         /* EQ */
         .eq-container {
@@ -345,9 +412,22 @@
             gap: 4px;
             padding: 8px 0;
             position: relative;
+            transition: opacity 0.2s, filter 0.2s;
         }
-        .eq-band { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 0; }
-        .eq-val { font-size: 0.7rem; color: var(--accent); margin-bottom: 5px; height: 16px; font-weight: 500; }
+        .eq-band {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            min-width: 0;
+        }
+        .eq-val {
+            font-size: 0.7rem;
+            color: var(--accent);
+            margin-bottom: 5px;
+            height: 16px;
+            font-weight: 500;
+        }
         .eq-slider-box {
             height: 180px;
             width: 28px;
@@ -356,25 +436,23 @@
             border-radius: 12px;
             cursor: pointer;
         }
-        .eq-slider-track {
-            position: absolute;
-            left: 50%;
-            top: 8px;
-            bottom: 8px;
-            width: 4px;
-            transform: translateX(-50%);
-            background: #e4e7ed;
-            border-radius: 2px;
-        }
+        .eq-slider-track,
         .eq-slider-fill {
             position: absolute;
             left: 50%;
             width: 4px;
             transform: translateX(-50%);
-            background: var(--accent);
+            background: #e4e7ed;
             border-radius: 2px;
+        }
+        .eq-slider-track {
+            top: 8px;
+            bottom: 8px;
+        }
+        .eq-slider-fill {
             bottom: 8px;
             height: 0;
+            background: var(--accent);
         }
         .eq-slider-thumb {
             position: absolute;
@@ -396,21 +474,52 @@
             cursor: grabbing;
             transform: translateX(-50%) scale(1.15);
         }
-        .eq-freq { font-size: 0.7rem; color: var(--text-dim); margin-top: 5px; }
+        .eq-freq {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            margin-top: 5px;
+        }
 
         /* Toast */
         .toast {
-            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-            padding: 10px 20px; border-radius: 8px; font-size: 0.8rem;
-            opacity: 0; transition: opacity 0.3s; z-index: 200;
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 200;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         }
         .toast.show { opacity: 1; }
-        .toast.ok { background: rgba(76,175,80,0.9); color: #fff; }
-        .toast.err { background: rgba(244,67,54,0.9); color: #fff; }
+        .toast.ok {
+            background: rgba(103,194,58,0.95);
+            color: #fff;
+        }
+        .toast.err {
+            background: rgba(244,67,54,0.95);
+            color: #fff;
+        }
 
         @media (max-width: 420px) {
-            .item { max-width: 100%; }
-            .cover-art { width: 60px; height: 60px; }
+            .item,
+            .setting-item {
+                max-width: 100%;
+                flex: 1 1 100%;
+            }
+            .setting-row {
+                gap: 16px;
+            }
+            .section-content {
+                margin-bottom: 30px;
+            }
+            .cover-art {
+                width: 60px;
+                height: 60px;
+            }
             .modal {
                 width: 100%;
                 max-width: 100%;
@@ -420,15 +529,12 @@
             .modal-overlay {
                 padding-top: 0;
             }
-            .modal .section-title {
-                margin-top: 30px;
-            }
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>DLNA to AirPlay Bridge</h1>
+        <h1>unAirplay</h1>
     </div>
 
     <div class="container" id="device-list">
@@ -445,77 +551,81 @@
             </div>
 
             <!-- Master switch -->
-            <div class="grid">
-                <div class="item">
-                    <div class="item-label">
-                        <span>Enable DSP</span>
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                            <label class="switch"><input type="checkbox" id="dsp_enabled"><span class="sl"></span></label>
-                            <button class="play-btn" style="background: #f5f5f5; color: var(--text); border: 1px solid var(--border-light); margin: 0; padding: 4px 10px; font-size: 0.7rem;" onclick="resetDsp()">Reset</button>
-                        </div>
-                    </div>
+            <div class="section-header">
+                <span class="section-title">Enable DSP</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button class="play-btn" style="background: #f5f5f5; color: var(--text); border: 1px solid var(--border-light); margin: 0; padding: 4px 10px; font-size: 0.7rem;" onclick="resetDsp()">Reset</button>
+                    <label class="switch"><input type="checkbox" id="dsp_enabled"><span class="sl"></span></label>
                 </div>
             </div>
 
-            <!-- 10-Band EQ -->
-            <div class="section-title">Equalizer</div>
-            <div style="background: #f8f8f8; border: 1px solid var(--border-light); border-radius: 8px; padding: 12px;">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-                    <span style="font-size:0.8rem;">10-Band EQ</span>
-                    <label class="switch"><input type="checkbox" id="eq_enabled" checked><span class="sl"></span></label>
-                </div>
+            <!-- Equalizer -->
+            <div class="section-header">
+                <span class="section-title">Equalizer</span>
+                <label class="switch"><input type="checkbox" id="eq_enabled" checked><span class="sl"></span></label>
+            </div>
+            <div class="section-content eq-container-wrapper">
                 <div class="eq-container" id="eq_container">
                 </div>
             </div>
 
             <!-- Spectral Enhancement -->
-            <div class="section-title">Spectral Enhancement</div>
-            <div class="grid">
-                <div class="item">
-                    <div class="item-label">
-                        <span>FFT Spectral</span>
-                        <label class="switch"><input type="checkbox" id="use_spectral" checked><span class="sl"></span></label>
+            <div class="section-header">
+                <span class="section-title">Spectral Enhancement</span>
+                <label class="switch"><input type="checkbox" id="spectral_enabled" checked><span class="sl"></span></label>
+            </div>
+            <div class="section-content" data-section="spectral">
+                <div class="setting-row">
+                    <div class="setting-item">
+                        <div class="item-label" style="margin-bottom: 0;">
+                            <span>FFT Spectral</span>
+                            <label class="switch"><input type="checkbox" id="use_spectral" checked><span class="sl"></span></label>
+                        </div>
                     </div>
-                </div>
-                <div class="item">
-                    <div class="item-label"><span>High Freq Gain</span><span class="val" id="highfreq_gain_v">1.3x</span></div>
-                    <input type="range" id="highfreq_gain" min="1.0" max="2.0" step="0.1" value="1.3"/>
-                </div>
-                <div class="item">
-                    <div class="item-label"><span>Low Freq Gain</span><span class="val" id="lowfreq_gain_v">1.2x</span></div>
-                    <input type="range" id="lowfreq_gain" min="1.0" max="2.0" step="0.1" value="1.2">
+                    <div class="setting-item">
+                        <div class="item-label"><span>High Freq Gain</span><span class="val" id="highfreq_gain_v">1.3x</span></div>
+                        <input type="range" id="highfreq_gain" min="0.5" max="2.0" step="0.1" value="1.3"/>
+                    </div>
+                    <div class="setting-item">
+                        <div class="item-label"><span>Low Freq Gain</span><span class="val" id="lowfreq_gain_v">1.2x</span></div>
+                        <input type="range" id="lowfreq_gain" min="0.5" max="2.0" step="0.1" value="1.2">
+                    </div>
                 </div>
             </div>
 
             <!-- Dynamic Compression -->
-            <div class="section-title">Dynamic Compression</div>
-            <div class="grid">
-                <div class="item">
-                    <div class="item-label"><span>Enable</span><label class="switch"><input type="checkbox" id="use_compression" checked><span class="sl"></span></label></div>
-                </div>
-                <div class="item">
-                    <div class="item-label"><span>Threshold</span><span class="val" id="compression_threshold_v">0.70</span></div>
-                    <input type="range" id="compression_threshold" min="0.3" max="1.0" step="0.05" value="0.7">
-                </div>
-                <div class="item">
-                    <div class="item-label"><span>Ratio</span><span class="val" id="compression_ratio_v">3:1</span></div>
-                    <input type="range" id="compression_ratio" min="1.5" max="10" step="0.5" value="3.0">
-                </div>
-                <div class="item">
-                    <div class="item-label"><span>Makeup Gain</span><span class="val" id="compression_makeup_v">1.2x</span></div>
-                    <input type="range" id="compression_makeup" min="1.0" max="2.0" step="0.1" value="1.2">
+            <div class="section-header">
+                <span class="section-title">Dynamic Compression</span>
+                <label class="switch"><input type="checkbox" id="use_compression" checked><span class="sl"></span></label>
+            </div>
+            <div class="section-content" data-section="compression">
+                <div class="setting-row">
+                    <div class="setting-item">
+                        <div class="item-label"><span>Threshold</span><span class="val" id="compression_threshold_v">0.70</span></div>
+                        <input type="range" id="compression_threshold" min="0.3" max="1.0" step="0.05" value="0.7">
+                    </div>
+                    <div class="setting-item">
+                        <div class="item-label"><span>Ratio</span><span class="val" id="compression_ratio_v">3:1</span></div>
+                        <input type="range" id="compression_ratio" min="1.5" max="10" step="0.5" value="3.0">
+                    </div>
+                    <div class="setting-item">
+                        <div class="item-label"><span>Makeup Gain</span><span class="val" id="compression_makeup_v">1.2x</span></div>
+                        <input type="range" id="compression_makeup" min="1.0" max="2.0" step="0.1" value="1.2">
+                    </div>
                 </div>
             </div>
 
             <!-- Stereo Widening -->
-            <div class="section-title">Stereo Widening</div>
-            <div class="grid">
-                <div class="item">
-                    <div class="item-label"><span>Enable</span><label class="switch"><input type="checkbox" id="use_stereo" checked><span class="sl"></span></label></div>
-                </div>
-                <div class="item">
-                    <div class="item-label"><span>Width</span><span class="val" id="stereo_width_v">1.2x</span></div>
-                    <input type="range" id="stereo_width" min="0.5" max="2.0" step="0.1" value="1.2">
+            <div class="section-header">
+                <span class="section-title">Stereo Widening</span>
+                <label class="switch"><input type="checkbox" id="use_stereo" checked><span class="sl"></span></label>
+            </div>
+            <div class="section-content" data-section="stereo">
+                <div class="setting-row">
+                    <div class="setting-item setting-item-wide">
+                        <div class="item-label"><span>Width</span><span class="val" id="stereo_width_v">1.2x</span></div>
+                        <input type="range" id="stereo_width" min="0.5" max="2.0" step="0.1" value="1.2">
+                    </div>
                 </div>
             </div>
         </div>
@@ -626,15 +736,8 @@
                                 : '<span class="placeholder">&#9835;</span>'}
                         </div>
                         <div class="track-info">
-                            <div class="track-info-header">
-                                <div style="min-width:0; flex:1;">
-                                    <div class="track-title">${device.play_title || 'Unknown'}</div>
-                                    <div class="track-artist">${device.play_artist || ''}${device.play_album ? ' - ' + device.play_album : ''}</div>
-                                </div>
-                                <button class="dsp-btn ${device.dsp_enabled ? 'active' : ''}" onclick="openDspModal('${device.device_id}')">
-                                    DSP ${device.dsp_enabled ? 'ON' : 'OFF'}
-                                </button>
-                            </div>
+                            <div class="track-title">${device.play_title || 'Unknown'}</div>
+                            <div class="track-artist">${device.play_artist || ''}${device.play_album ? ' - ' + device.play_album : ''}</div>
                             ${audioInfo ? `<div class="track-audio-info">${audioInfo}</div>` : ''}
                         </div>
                     </div>
@@ -653,7 +756,12 @@
                 <div class="${cardClass}" id="card-${device.device_id}">
                     <div class="card-header">
                         <span class="card-title">${device.device_name}</span>
-                        <span class="${badgeClass}">${badgeText}</span>
+                        <div style="display: flex; gap: 6px;">
+                            <span class="${badgeClass}">${badgeText}</span>
+                            <button class="dsp-btn ${device.dsp_enabled ? 'active' : ''}" onclick="openDspModal('${device.device_id}')">
+                                DSP ${device.dsp_enabled ? 'ON' : 'OFF'}
+                            </button>
+                        </div>
                     </div>
                     ${content}
                 </div>`;
@@ -695,13 +803,13 @@
         }
 
         // Fetch devices data
-        async function fetchDevices() {
+        async function fetchDevices(force) {
             try {
                 const r = await fetch('/api/devices');
                 const data = await r.json();
                 oldDevices = devices.slice();
                 devices = data;
-                const forceRender = oldDevices.length === 0 || oldDevices.length !== devices.length;
+                const forceRender = oldDevices.length === 0 || oldDevices.length !== devices.length || force;
                 renderDevices(forceRender);
             } catch (e) {
                 console.error('Failed to fetch devices:', e);
@@ -714,6 +822,32 @@
             pollTimer = setInterval(fetchDevices, 1000);
         }
 
+        // Load DSP config into modal
+        function loadDspConfig(device) {
+            const cfg = device.dsp_config || {};
+            document.getElementById('dsp_enabled').checked = device.dsp_enabled;
+
+            ['eq_enabled', 'spectral_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el && cfg[id] !== undefined) el.checked = cfg[id];
+            });
+
+            Object.keys(SLIDERS).forEach(id => {
+                const el = document.getElementById(id);
+                if (el && cfg[id] !== undefined) {
+                    el.value = cfg[id];
+                    updateSliderVal(id);
+                }
+            });
+
+            EQ_BANDS.forEach(freq => {
+                const value = cfg['eq_' + freq] !== undefined ? cfg['eq_' + freq] : 0;
+                setEqValue(freq, value);
+            });
+
+            applyInitialStates();
+        }
+
         // DSP Modal
         function openDspModal(deviceId) {
             currentDspDeviceId = deviceId;
@@ -721,40 +855,21 @@
             if (!device) return;
 
             document.getElementById('dsp-modal-device-name').textContent = device.device_name;
-
-            // Load DSP config into modal
-            const cfg = device.dsp_config || {};
-            document.getElementById('dsp_enabled').checked = device.dsp_enabled;
-
-            ['eq_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el && cfg[id] !== undefined) el.checked = cfg[id];
-            });
-
-            Object.keys(SLIDERS).forEach(id => {
-                const el = document.getElementById(id);
-                if (el && cfg[id] !== undefined) { el.value = cfg[id]; updateSliderVal(id); }
-            });
-
-            EQ_BANDS.forEach(freq => {
-                const k = 'eq_' + freq;
-                const value = cfg[k] !== undefined ? cfg[k] : 0;
-                setEqValue(freq, value);
-            });
-
+            loadDspConfig(device);
             document.getElementById('dsp-modal').classList.add('open');
         }
 
         function closeDspModal() {
             document.getElementById('dsp-modal').classList.remove('open');
             currentDspDeviceId = null;
+            fetchDevices(true);
         }
 
         async function saveDsp() {
             if (!currentDspDeviceId) return;
 
             const config = {};
-            ['eq_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
+            ['eq_enabled', 'spectral_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) config[id] = el.checked;
             });
@@ -777,7 +892,7 @@
                     })
                 });
                 toast('DSP settings applied', 'ok');
-                fetchDevices();
+                await fetchDevices();
             } catch (e) {
                 toast('Save failed', 'err');
             }
@@ -788,26 +903,9 @@
             try {
                 await fetch('/api/device/' + currentDspDeviceId + '/dsp/reset', { method: 'POST' });
                 toast('DSP reset to defaults', 'ok');
-                // Reload device data and update modal
                 await fetchDevices();
                 const device = devices.find(d => d.device_id === currentDspDeviceId);
-                if (device) {
-                    const cfg = device.dsp_config || {};
-                    document.getElementById('dsp_enabled').checked = device.dsp_enabled;
-                    ['eq_enabled', 'use_spectral', 'use_compression', 'use_stereo'].forEach(id => {
-                        const el = document.getElementById(id);
-                        if (el && cfg[id] !== undefined) el.checked = cfg[id];
-                    });
-                    Object.keys(SLIDERS).forEach(id => {
-                        const el = document.getElementById(id);
-                        if (el && cfg[id] !== undefined) { el.value = cfg[id]; updateSliderVal(id); }
-                    });
-                    EQ_BANDS.forEach(freq => {
-                        const k = 'eq_' + freq;
-                        const value = cfg[k] !== undefined ? cfg[k] : 0;
-                        setEqValue(freq, value);
-                    });
-                }
+                if (device) loadDspConfig(device);
             } catch (e) {
                 toast('Reset failed', 'err');
             }
@@ -975,12 +1073,94 @@
             setTimeout(() => el.className = 'toast', 2000);
         }
 
+        // Toggle section disabled state
+        function toggleSectionState(elements, disabled) {
+            elements.forEach(el => {
+                if (disabled) {
+                    el.classList.add('dsp-section-disabled');
+                } else {
+                    el.classList.remove('dsp-section-disabled');
+                }
+            });
+        }
+
+        // Apply initial disabled states based on toggle switches
+        function applyInitialStates() {
+            const dspEnabled = document.getElementById('dsp_enabled').checked;
+            const allSectionHeaders = document.querySelectorAll('.section-header');
+            const sectionHeaders = Array.from(allSectionHeaders).slice(1);
+            const sectionContents = document.querySelectorAll('.section-content, .eq-container-wrapper');
+
+            // Master DSP state
+            toggleSectionState([...sectionHeaders, ...sectionContents], !dspEnabled);
+
+            // Individual section states (only when DSP is enabled)
+            if (dspEnabled) {
+                const sections = [
+                    { toggle: 'spectral_enabled', content: '[data-section="spectral"]' },
+                    { toggle: 'use_compression', content: '[data-section="compression"]' },
+                    { toggle: 'use_stereo', content: '[data-section="stereo"]' },
+                    { toggle: 'eq_enabled', content: '#eq_container' }
+                ];
+
+                sections.forEach(({ toggle, content }) => {
+                    const toggleEl = document.getElementById(toggle);
+                    const contentEl = document.querySelector(content);
+                    if (toggleEl && contentEl) {
+                        contentEl.classList.toggle('disabled', !toggleEl.checked);
+                    }
+                });
+            }
+        }
+
+        // Setup section toggle listeners
+        function setupSectionToggles() {
+            // Master DSP toggle
+            const dspToggle = document.getElementById('dsp_enabled');
+            if (dspToggle) {
+                dspToggle.addEventListener('change', function() {
+                    const allSectionHeaders = document.querySelectorAll('.section-header');
+                    const sectionHeaders = Array.from(allSectionHeaders).slice(1);
+                    const sectionContents = document.querySelectorAll('.section-content, .eq-container-wrapper');
+
+                    toggleSectionState([...sectionHeaders, ...sectionContents], !this.checked);
+                    if (this.checked) applyInitialStates();
+                    debouncedSave();
+                });
+            }
+
+            // Individual section toggles
+            const sectionToggles = [
+                { id: 'spectral_enabled', selector: '[data-section="spectral"]' },
+                { id: 'use_compression', selector: '[data-section="compression"]' },
+                { id: 'use_stereo', selector: '[data-section="stereo"]' },
+                { id: 'eq_enabled', selector: '#eq_container' }
+            ];
+
+            sectionToggles.forEach(({ id, selector }) => {
+                const toggle = document.getElementById(id);
+                if (toggle) {
+                    toggle.addEventListener('change', function() {
+                        const content = document.querySelector(selector);
+                        if (content) {
+                            content.classList.toggle('disabled', !this.checked);
+                        }
+                        debouncedSave();
+                    });
+                }
+            });
+        }
+
         // Setup auto-save listeners for all DSP controls
         function setupAutoSave() {
             const modal = document.getElementById('dsp-modal');
 
-            // All checkboxes (switches)
+            // All checkboxes (switches) - but exclude section toggles as they have their own handlers
             modal.querySelectorAll('input[type="checkbox"]').forEach(el => {
+                // Skip section toggles (they're handled by setupSectionToggles)
+                if (['dsp_enabled', 'eq_enabled', 'spectral_enabled', 'use_compression', 'use_stereo'].includes(el.id)) {
+                    return;
+                }
                 el.addEventListener('change', debouncedSave);
             });
 
@@ -993,6 +1173,7 @@
         // Init
         document.addEventListener('DOMContentLoaded', () => {
             initEQ();
+            setupSectionToggles();
             setupAutoSave();
             Object.keys(SLIDERS).forEach(id => {
                 const el = document.getElementById(id);

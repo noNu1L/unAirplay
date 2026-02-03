@@ -1,11 +1,11 @@
 """
-DLNA to AirPlay Bridge - Global Configuration
+unAirplay - Global Configuration
 """
 import socket
 import uuid
 
 # ================= Application Info =================
-APP_NAME = "DLNA to AirPlay"
+APP_NAME = "unAirplay"
 APP_VERSION = "1.0.0"
 
 # ================= Network Configuration =================
@@ -48,12 +48,12 @@ OUTPUT_BITRATE = "320k"
 
 # ================= Channel Separation (Reserved) =================
 # Enable stereo channel separation for multiple speakers
-CHANNEL_SEPARATION_ENABLED = False
+# CHANNEL_SEPARATION_ENABLED = False
 
 # Speaker group configuration
 # 扬声器组 多个输出源组合 左右声道分离
 # Format: [{"group_id": "living_room", "left": "device_id_1", "right": "device_id_2"}]
-SPEAKER_GROUPS = []
+# SPEAKER_GROUPS = []
 
 # ================= AirPlay Scanner Configuration =================
 # Interval for scanning AirPlay devices (seconds)
@@ -72,7 +72,7 @@ ENABLE_SERVER_SPEAKER = True
 
 # ================= DSP Default Configuration =================
 DEFAULT_DSP_CONFIG = {
-    "eq_enabled": True,
+    "eq_enabled": False,
     "eq_31": 0.0,
     "eq_62": 0.0,
     "eq_125": 0.0,
@@ -83,9 +83,10 @@ DEFAULT_DSP_CONFIG = {
     "eq_4000": 0.0,
     "eq_8000": 0.0,
     "eq_16000": 0.0,
-    "highfreq_gain": 1.3,
-    "lowfreq_gain": 1.0,
+    "spectral_enabled": True,
     "use_spectral": True,
+    "highfreq_gain": 1.7,
+    "lowfreq_gain": 1.0,
     "use_compression": False,
     "compression_threshold": 0.7,
     "compression_ratio": 3.0,
