@@ -534,6 +534,62 @@
             margin-top: 5px;
         }
 
+        /* Help Icon with Tooltip */
+        .help-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1px solid var(--text-dim);
+            color: var(--text-dim);
+            font-size: 0.6rem;
+            font-weight: 600;
+            cursor: help;
+            margin-left: 4px;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .help-icon:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .help-tooltip {
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(48, 49, 51, 0.95);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 400;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            z-index: 100;
+            pointer-events: none;
+            line-height: 1.6;
+        }
+        .help-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: rgba(48, 49, 51, 0.95);
+        }
+        .help-icon:hover .help-tooltip,
+        .help-icon:focus .help-tooltip,
+        .help-icon.active .help-tooltip {
+            opacity: 1;
+            visibility: visible;
+        }
+
         /* Toast */
         .toast {
             position: fixed;
@@ -623,7 +679,7 @@
                 <!-- Mode Selector -->
                 <div style="padding-bottom: 12px; border-bottom: 1px solid var(--border-light); margin-bottom: 12px;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Mode:</span>
+                        <span style="font-size: 0.75rem; color: var(--text-dim);">Mode <span class="help-icon" tabindex="0" onclick="this.classList.toggle('active')">?<span class="help-tooltip">IIR: Infinite Impulse Response<br>FFT: Fast Fourier Transform<br>FIR: Finite Impulse Response</span></span></span>
                         <div class="radio-group" style="flex-direction: row; gap: 8px;">
                             <label class="radio-label" style="padding: 4px 12px; font-size: 0.75rem;">
                                 <input type="radio" name="spectral_mode" value="iir">
