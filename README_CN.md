@@ -1,10 +1,10 @@
-# DLNA to AirPlay Bridge
+# unAirplay
 
 [English](README.md) | [中文](README_CN.md)
 
 ---
 
-DLNA to AirPlay 是一个音频桥接工具。它能将 DLNA/UPnP 协议的音频流转发到 AirPlay 设备或服务器本地扬声器，让不支持 AirPlay 的安卓设备或音乐 App 也能向 AirPlay 设备推送音频。
+unAirplay 是一个音频桥接工具。它能将 DLNA/UPnP 协议的音频流转发到 AirPlay 设备或服务器本地扬声器，让不支持 AirPlay 的安卓设备或音乐 App 也能向 AirPlay 设备推送音频。
 
 本项目集成了 DSP（数字信号处理）功能，可用于调整输出音频的听感。
 
@@ -23,8 +23,8 @@ DLNA to AirPlay 是一个音频桥接工具。它能将 DLNA/UPnP 协议的音�
 克隆源码：
 
 ```bash
-git clone https://github.com/noNu1L/dlan-to-airplay
-cd dlna-to-airplay/docker
+git clone https://github.com/noNu1L/unAirplay
+cd unAirplay/docker
 ```
 
 启动服务：

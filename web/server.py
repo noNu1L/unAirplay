@@ -1,5 +1,5 @@
 """
-Web Server - API and frontend for DLNA to AirPlay bridge
+Web Server - API and frontend
 
 This module provides web control panel and REST API.
 It communicates via events instead of directly modifying devices.

@@ -1,5 +1,5 @@
 """
-DLNA to AirPlay Bridge - Main Entry Point
+ Main Entry Point
 
 Event-driven architecture:
 - VirtualDevice subscribes to command events and executes them
@@ -31,9 +31,9 @@ from enhancer.dsp_numpy import NumpyEnhancer as ScipyEnhancer
 from web.server import WebServer
 
 
-class DLNAToAirPlayBridge:
+class UnAirplay:
     """
-    Main application for DLNA to AirPlay bridge.
+    Main application for UnAirplay.
 
     Uses event-driven architecture for decoupled communication.
     """
@@ -138,7 +138,7 @@ class DLNAToAirPlayBridge:
 
 def main():
     """Main entry point"""
-    app = DLNAToAirPlayBridge()
+    app = UnAirplay()
 
     def signal_handler(sig, frame):
         print()

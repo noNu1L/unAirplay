@@ -1,9 +1,9 @@
 services:
-  dlna-airplay-bridge:
+  un-airplay:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: dlna-airplay-bridge
+    container_name: un-airplay
     restart: unless-stopped
 
     # Host network is REQUIRED for:

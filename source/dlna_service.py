@@ -83,7 +83,7 @@ def get_device_xml(device: "VirtualDevice") -> str:
     <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
     <friendlyName>{device.device_name}</friendlyName>
     <manufacturer>DLNA Bridge</manufacturer>
-    <modelName>DLNA-to-AirPlay</modelName>
+    <modelName>unAirplay</modelName>
     <modelNumber>2.0</modelNumber>
     <UDN>{device.dlna_uuid}</UDN>
     <serviceList>
@@ -359,7 +359,7 @@ class DLNAService:
             f"ST: {st}\r\n"
             f"USN: {device.dlna_uuid}::{st}\r\n"
             "CACHE-CONTROL: max-age=1800\r\n"
-            "SERVER: Python/DLNA-to-AirPlay UPnP/1.0\r\n"
+            "SERVER: Python/unAirplay UPnP/1.0\r\n"
             "EXT:\r\n"
             "\r\n"
         ).encode()
@@ -375,7 +375,7 @@ class DLNAService:
             f"USN: {device.dlna_uuid}::{nt}\r\n"
             f"LOCATION: {location}\r\n"
             "CACHE-CONTROL: max-age=1800\r\n"
-            "SERVER: Python/DLNA-to-AirPlay UPnP/1.0\r\n"
+            "SERVER: Python/unAirplay UPnP/1.0\r\n"
             "\r\n"
         ).encode()
 

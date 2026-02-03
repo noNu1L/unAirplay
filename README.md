@@ -1,10 +1,10 @@
-# DLNA to AirPlay Bridge
+# unAirplay
 
 [English](README.md) | [中文](README_CN.md)
 
 ---
 
-DLNA to AirPlay is an audio bridging tool. It forwards DLNA/UPnP audio streams to AirPlay devices or the server's local speakers, allowing Android devices or music apps that don't support AirPlay to push audio to AirPlay devices.
+unAirplay is an audio bridging tool. It forwards DLNA/UPnP audio streams to AirPlay devices or the server's local speakers, allowing Android devices or music apps that don't support AirPlay to push audio to AirPlay devices.
 
 This project integrates DSP (Digital Signal Processing) functionality for adjusting the output audio characteristics.
 
@@ -23,8 +23,8 @@ This project integrates DSP (Digital Signal Processing) functionality for adjust
 Clone the source code:
 
 ```bash
-git clone https://github.com/noNu1L/dlan-to-airplay
-cd dlna-to-airplay/docker
+git clone https://github.com/noNu1L/unAirplay
+cd unAirplay/docker
 ```
 
 Start the service:
