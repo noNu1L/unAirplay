@@ -37,7 +37,8 @@ def log_audio_devices():
     """
     try:
         devices = sd.query_devices()
-        default_output = sd.default.device[1] if isinstance(sd.default.device, tuple) else sd.default.device
+
+        default_output = sd.query_devices(kind='output')['index']  # Output device index
 
         log_info("AudioDetector", "=== Available Audio Devices ===")
 
@@ -62,18 +63,3 @@ def log_audio_devices():
         log_debug("AudioDetector", f"Failed to list audio devices: {e}")
 
 
-def get_default_output_device() -> Any | None:
-    """
-    Get default audio output device information.
-
-    Returns:
-        Dictionary with device info, or None if no default device
-    """
-    try:
-        default_idx = sd.default.device[1] if isinstance(sd.default.device, tuple) else sd.default.device
-        devices = sd.query_devices()
-        if 0 <= default_idx < len(devices):
-            return devices[default_idx]
-    except Exception as e:
-        log_debug("AudioDetector", f"Failed to get default device: {e}")
-    return None

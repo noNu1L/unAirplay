@@ -508,7 +508,7 @@ class DLNAService:
         log_debug("AVTransport", f"Action: {action} from {req_ip} for {device.device_name}")
 
         if action == "SetAVTransportURI":
-            log_debug("SetAVTransportURI", f"body \n:{body}")
+            log_debug("SetAVTransportURI", f"body:\n{body}\n--- end ---")
             match = re.search(r"<CurrentURI>([^<]*)</CurrentURI>", body)
             if match:
                 uri = self._decode_xml_entities(match.group(1))
@@ -532,7 +532,7 @@ class DLNAService:
             log_info("Playback", f"Play: {device.device_name}")
 
             event_bus.publish(cmd_play(device.device_id, device.play_url, device.play_position))
-            # TODO 大文件解码Seek行为等待时间比较长,需要缓存层解决
+            # TODO 大文件解码Seek行为等待时间比较长,需要缓存层解决 。已加入缓存层，但未对Seek行为读取缓存
             response = soap_response("Play", "AVTransport")
 
         elif action == "Stop":

@@ -50,8 +50,6 @@ class NumpyEnhancer(BaseEnhancer):
         # Load default parameters
         self._load_defaults()
 
-        log("DSP", "NumpyEnhancer initialized with IIR/FFT/FIR mode support")
-
     def _load_defaults(self):
         """Load default parameters from config"""
         # Mode and enable flags

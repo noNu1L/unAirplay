@@ -420,6 +420,14 @@ class VirtualDevice:
 
     def get_current_position(self) -> float:
         """Get current playback position in seconds"""
+        # Try to get actual position from Output instance
+        if self._output and hasattr(self._output, 'get_current_position'):
+            try:
+                return self._output.get_current_position()
+            except:
+                pass
+
+        # Fallback to theoretical position calculation
         if self.play_state == "PLAYING" and self.play_start_time > 0:
             elapsed = time.time() - self.play_start_time
             return self.play_position + elapsed

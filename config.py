@@ -6,7 +6,7 @@ import uuid
 
 # ================= Application Info =================
 APP_NAME = "unAirplay"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 # ================= Network Configuration =================
 HTTP_PORT = 6088
@@ -45,6 +45,10 @@ BUFFER_SIZE = 10             # Audio buffer queue size
 
 # Output bitrate for DSP mode (when re-encoding is needed)
 OUTPUT_BITRATE = "320k"
+
+# Minimum cache buffer size before starting playback (KB)
+# Playback starts when downloaded cache file exceeds this size
+MIN_CACHE_SIZE = 100  # KB
 
 # ================= Channel Separation (Reserved) =================
 # Enable stereo channel separation for multiple speakers

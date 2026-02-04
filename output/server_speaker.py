@@ -3,13 +3,17 @@ ServerSpeakerOutput - System speaker audio output using sounddevice
 
 Outputs audio to the server's local speakers via sounddevice library.
 Supports DSP processing and volume/mute control.
+
+Architecture (Decoupled Download & Playback):
+- Download thread: FFmpegDownloader (fast, no re-encoding)
+- Playback thread: FFmpegDecoder from cache file to PCM
+- Benefits: Network interruption won't affect playback if cache is ahead
 """
 import queue
 import threading
-import subprocess
-import sys
 import time
 import asyncio
+import os
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
@@ -18,12 +22,21 @@ import sounddevice as sd
 from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
 from core.events import state_changed
+from core.ffmpeg_downloader import FFmpegDownloader, DownloaderConfig
+from core.ffmpeg_decoder import FFmpegDecoder, DecoderConfig
+from core.ffmpeg_utils import PCMFormat
 from output.system_volume_controller import create_system_volume_controller
-from config import SAMPLE_RATE, CHANNELS, CHUNK_DURATION_MS, BUFFER_SIZE
+from config import SAMPLE_RATE, CHANNELS, CHUNK_DURATION_MS, BUFFER_SIZE, MIN_CACHE_SIZE
 
 if TYPE_CHECKING:
     from device.virtual_device import VirtualDevice
     from enhancer.base import BaseEnhancer
+
+# Cache directory for audio files
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache")
+
+# Convert MIN_CACHE_SIZE from KB to bytes
+MIN_CACHE_BYTES = MIN_CACHE_SIZE * 1024
 
 
 class ServerSpeakerOutput:
@@ -49,7 +62,7 @@ class ServerSpeakerOutput:
         self._sample_rate = SAMPLE_RATE
         self._channels = CHANNELS
         self._chunk_samples = int(SAMPLE_RATE * CHUNK_DURATION_MS / 1000)
-        self._bytes_per_sample = 4  # float32
+        self._bytes_per_sample = PCMFormat.F32LE.bytes_per_sample
         self._chunk_bytes = self._chunk_samples * self._channels * self._bytes_per_sample
 
         # Audio queue (PCM chunks from decoder)
@@ -59,8 +72,15 @@ class ServerSpeakerOutput:
         self._stream: Optional[sd.OutputStream] = None
         self._buffer = np.zeros((0, self._channels), dtype=np.float32)
 
-        # FFmpeg decoder process
-        self._decoder_process: Optional[subprocess.Popen] = None
+        # FFmpeg downloader and decoder
+        self._downloader = FFmpegDownloader(
+            DownloaderConfig(
+                cache_dir=CACHE_DIR,
+                cache_filename=f"{device.device_id}_play_cache"
+            ),
+            tag="ServerSpeaker"
+        )
+        self._decoder: Optional[FFmpegDecoder] = None
         self._decoder_thread: Optional[threading.Thread] = None
 
         # State
@@ -141,16 +161,63 @@ class ServerSpeakerOutput:
                 outdata.fill(0)
 
     def _decoder_loop(self):
-        """Decoder thread: reads decoded PCM from URL, applies DSP, pushes to audio queue"""
+        """Decoder thread: waits for cache, reads decoded PCM from cache file, applies DSP, pushes to audio queue"""
         device_name = self._device.device_name
+        cache_file = self._downloader.file_path
         log_debug("ServerSpeaker", f"Decoder thread started: {device_name}")
+
+        # Wait for cache file to reach minimum size
+        log_info("ServerSpeaker", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB): {device_name}")
+        wait_start = time.time()
+        max_wait = 30  # Maximum wait time in seconds
+
+        while self._is_playing:
+            file_size = self._downloader.get_file_size()
+            if file_size >= MIN_CACHE_BYTES:
+                log_info("ServerSpeaker", f"Cache buffer ready ({file_size // 1024}KB): {device_name}")
+                break
+
+            # Check for download error
+            if self._downloader.error:
+                log_error("ServerSpeaker", f"Download failed, stopping decoder: {device_name}")
+                self._is_playing = False
+                return
+
+            # Check timeout
+            if time.time() - wait_start > max_wait:
+                log_error("ServerSpeaker", f"Cache buffer timeout: {device_name}")
+                self._is_playing = False
+                return
+
+            time.sleep(0.1)
+
+        if not self._is_playing:
+            return
+
+        # Start FFmpeg decoder from cache file
+        self._decoder = FFmpegDecoder(
+            DecoderConfig(
+                sample_rate=self._sample_rate,
+                channels=self._channels,
+                pcm_format=PCMFormat.F32LE,
+                realtime=True,
+                quiet=True
+            ),
+            tag="ServerSpeaker"
+        )
+        self._decoder.start(cache_file)
+
+        if not self._decoder.is_running:
+            log_error("ServerSpeaker", f"Failed to start decoder: {device_name}")
+            self._is_playing = False
+            return
 
         buffer = b""
         first_data_received = False
 
-        while self._is_playing and self._decoder_process:
+        while self._is_playing and self._decoder.is_running:
             try:
-                data = self._decoder_process.stdout.read(self._chunk_bytes)
+                data = self._decoder.read(self._chunk_bytes)
                 if not data:
                     log_info("ServerSpeaker", f"Decoder stream ended: {device_name}")
                     # Notify playback completed
@@ -176,7 +243,7 @@ class ServerSpeakerOutput:
                                 self._event_loop
                             )
                     except Exception as e:
-                        log_error("ServerSpeaker.py", f"Failed to notify DLNA client of state change: {e}")
+                        log_error("ServerSpeaker", f"Failed to notify DLNA client of state change: {e}")
 
                 buffer += data
 
@@ -210,76 +277,41 @@ class ServerSpeakerOutput:
         self._is_playing = False
         log_debug("ServerSpeaker", f"Decoder thread ended: {device_name}")
 
-    def _start_decoder(self, url: str, seek_position: float = 0.0):
-        """Start FFmpeg decoder for URL"""
-        self._stop_decoder()
+    def _start_playback(self, url: str, seek_position: float = 0.0):
+        """Start playback: download thread + decoder thread"""
+        self._stop_playback_internal()
 
-        # Build FFmpeg command
-        cmd = ["ffmpeg"]
+        self._current_url = url
+        self._current_position = seek_position
+        self._playback_start_time = time.time()
+        self._is_playing = True
 
-        # Add seek position if specified
-        if seek_position > 0:
-            cmd.extend(["-ss", str(seek_position)])
-
-        # Use -re for real-time playback
-        cmd.extend([
-            "-re",
-            "-i", url,
-            "-vn",
-            "-acodec", "pcm_f32le",
-            "-ar", str(self._sample_rate),
-            "-ac", str(self._channels),
-            "-f", "f32le",
-            "pipe:1"
-        ])
-
-        log_info("ServerSpeaker", f"Starting decoder: {self._device.device_name}" +
+        log_info("ServerSpeaker", f"Starting playback: {self._device.device_name}" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
-        log_debug("ServerSpeaker", f"URL: {url}")
 
-        try:
-            kwargs = {}
-            if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        # Start download (from seek position if specified)
+        self._downloader.start(url, seek_position=seek_position)
 
-            self._decoder_process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                **kwargs
-            )
+        # Start decoder thread (will wait for cache buffer)
+        self._decoder_thread = threading.Thread(
+            target=self._decoder_loop,
+            daemon=True
+        )
+        self._decoder_thread.start()
 
-            self._current_url = url
-            self._current_position = seek_position
-            self._playback_start_time = time.time()
-            self._is_playing = True
-
-            self._decoder_thread = threading.Thread(
-                target=self._decoder_loop,
-                daemon=True
-            )
-            self._decoder_thread.start()
-
-        except Exception as e:
-            log_error("ServerSpeaker", f"Failed to start decoder: {e}")
-            self._decoder_process = None
-
-    def _stop_decoder(self):
-        """Stop decoder process"""
+    def _stop_playback_internal(self):
+        """Stop both download and decoder processes"""
         self._is_playing = False
 
-        if self._decoder_process:
-            try:
-                self._decoder_process.terminate()
-                self._decoder_process.wait(timeout=2)
-            except:
-                try:
-                    self._decoder_process.kill()
-                except:
-                    pass
-            self._decoder_process = None
+        # Stop downloader
+        self._downloader.stop()
 
+        # Stop decoder
+        if self._decoder:
+            self._decoder.stop()
+            self._decoder = None
+
+        # Wait for decoder thread to finish
         if self._decoder_thread and self._decoder_thread.is_alive():
             self._decoder_thread.join(timeout=1)
         self._decoder_thread = None
@@ -311,7 +343,7 @@ class ServerSpeakerOutput:
     def stop(self):
         """Stop audio output completely"""
         self._running = False
-        self._stop_decoder()
+        self._stop_playback_internal()
 
         if self._stream:
             try:
@@ -329,6 +361,9 @@ class ServerSpeakerOutput:
             except queue.Empty:
                 break
 
+        # Clean up cache file
+        self._downloader.cleanup_file()
+
         log_info("ServerSpeaker", f"Audio output stopped: {self._device.device_name}")
 
     def play(self, url: str, position: float = 0.0):
@@ -341,12 +376,12 @@ class ServerSpeakerOutput:
         """
         if not self._running:
             self.start()
-        self._start_decoder(url, seek_position=position)
+        self._start_playback(url, seek_position=position)
         log_info("ServerSpeaker", f"Playing: {self._device.device_name}")
 
     def stop_playback(self):
-        """Stop current playback"""
-        self._stop_decoder()
+        """Stop current playback and clean up cache"""
+        self._stop_playback_internal()
 
         # Clear audio queue
         while not self._audio_queue.empty():
@@ -355,19 +390,23 @@ class ServerSpeakerOutput:
             except queue.Empty:
                 break
 
+        # Clean up cache file
+        self._downloader.cleanup_file()
+
         log_info("ServerSpeaker", f"Playback stopped: {self._device.device_name}")
 
     def pause(self):
-        """Pause playback - record position and stop"""
+        """Pause playback - record position and stop (keep cache for resume)"""
         if self._is_playing:
             elapsed = time.time() - self._playback_start_time
             self._current_position += elapsed
-        self._stop_decoder()
+        self._stop_playback_internal()
+        # Note: Don't clean up cache file here, so we can resume later
         log_info("ServerSpeaker", f"Paused: {self._device.device_name}")
 
     def seek(self, position: float):
         """
-        Seek to position (restarts decoder from position).
+        Seek to position (restarts playback from position).
 
         Args:
             position: Position in seconds
@@ -380,8 +419,8 @@ class ServerSpeakerOutput:
                     self._audio_queue.get_nowait()
                 except queue.Empty:
                     break
-            # Restart decoder from new position
-            self._start_decoder(self._current_url, position)
+            # Restart playback from new position
+            self._start_playback(self._current_url, position)
         else:
             log_warning("ServerSpeaker", f"Cannot seek: no URL: {self._device.device_name}")
 
@@ -493,13 +532,4 @@ class ServerSpeakerOutput:
             self.set_mute(muted)
 
 
-def list_audio_devices():
-    """List available audio output devices"""
-    print("\nAvailable audio output devices:")
-    print("-" * 50)
-    devices = sd.query_devices()
-    for i, dev in enumerate(devices):
-        if dev["max_output_channels"] > 0:
-            default = " (default)" if i == sd.default.device[1] else ""
-            print(f"  [{i}] {dev['name']}{default}")
-    print("-" * 50)
+

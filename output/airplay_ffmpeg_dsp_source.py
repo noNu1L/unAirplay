@@ -4,13 +4,19 @@ AirPlay FFmpeg DSP Audio Source - Lossless audio source for pyatv
 Implements pyatv's AudioSource interface to provide DSP-processed PCM directly.
 This bypasses the need for intermediate encoding (MP3), achieving lossless quality.
 
+Architecture (Decoupled Download & Playback):
+- Download thread: FFmpegDownloader (fast, no re-encoding)
+- Playback: FFmpegDecoder from cache file to PCM
+- Benefits: Network interruption won't affect playback if cache is ahead
+
 Audio chain:
-    URL -> FFmpeg (decode to PCM) -> DSP processing -> AudioSource -> pyatv (ALAC encode) -> AirPlay
+    URL -> FFmpegDownloader -> cache file -> FFmpegDecoder -> DSP -> AudioSource -> pyatv (ALAC) -> AirPlay
 """
 import array
 import asyncio
-import subprocess
+import os
 import sys
+import time
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
@@ -21,11 +27,20 @@ from pyatv.interface import MediaMetadata
 from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
 from core.events import state_changed
-from config import SAMPLE_RATE, CHANNELS
+from core.ffmpeg_downloader import FFmpegDownloader, DownloaderConfig
+from core.ffmpeg_decoder import FFmpegDecoder, DecoderConfig
+from core.ffmpeg_utils import PCMFormat
+from config import SAMPLE_RATE, CHANNELS, MIN_CACHE_SIZE
 
 if TYPE_CHECKING:
     from enhancer.base import BaseEnhancer
     from device.virtual_device import VirtualDevice
+
+# Cache directory for audio files
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache")
+
+# Convert MIN_CACHE_SIZE from KB to bytes
+MIN_CACHE_BYTES = MIN_CACHE_SIZE * 1024
 
 
 def _to_audio_samples(data: bytes) -> bytes:
@@ -84,15 +99,22 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         self._duration = duration
         self._device = device  # For live DSP config updates
 
-        # FFmpeg process
-        self._process: Optional[subprocess.Popen] = None
+        # FFmpeg downloader and decoder
+        cache_filename = f"{device.device_id}_airplay_cache" if device else "airplay_cache"
+        self._downloader = FFmpegDownloader(
+            DownloaderConfig(
+                cache_dir=CACHE_DIR,
+                cache_filename=cache_filename
+            ),
+            tag="AirPlaySource"
+        )
+        self._decoder: Optional[FFmpegDecoder] = None
+
+        # State
         self._started = False
         self._closed = False
         self._eof = False
-        self._first_data_received = False  # Track first FFmpeg data
-
-        # Internal buffer for partial reads
-        self._buffer = b""
+        self._first_data_received = False
 
     @property
     def sample_rate(self) -> int:
@@ -118,57 +140,68 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         """Return media metadata."""
         return MediaMetadata(duration=self._duration if self._duration > 0 else None)
 
-    def _start_ffmpeg(self):
-        """Start FFmpeg decoder process."""
+    def _start_download_and_decoder(self):
+        """Start download and wait for cache buffer, then start decoder."""
         if self._started:
             return
 
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+        # Start download (from seek position if specified)
+        self._downloader.start(self._url, seek_position=self._seek_position)
 
-        # Add seek position
-        if self._seek_position > 0:
-            cmd.extend(["-ss", str(self._seek_position)])
-            log_debug("AirPlayFFmpegDspAudioSource", f"Seeking to {self._seek_position}s")
+        # Wait for cache buffer (blocking)
+        log_info("AirPlaySource", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB)" +
+                 (f" (seek: {self._seek_position:.1f}s)" if self._seek_position > 0 else ""))
+        wait_start = time.time()
+        max_wait = 30  # seconds
 
-        # Input and output settings - output s16le PCM
-        cmd.extend([
-            "-i", self._url,
-            "-vn",  # No video
-            "-acodec", "pcm_s16le",  # 16-bit signed PCM little endian
-            "-ar", str(self._sample_rate),
-            "-ac", str(self._channels),
-            "-f", "s16le",  # Raw PCM output
-            "-"  # Output to stdout
-        ])
+        while True:
+            file_size = self._downloader.get_file_size()
+            if file_size >= MIN_CACHE_BYTES:
+                log_info("AirPlaySource", f"Cache buffer ready ({file_size // 1024}KB)")
+                break
 
-        log_info("AirPlayFFmpegDspAudioSource", f"Starting decoder: sample_rate={self._sample_rate}, channels={self._channels}" +
-                 (f", seek={self._seek_position}s" if self._seek_position > 0 else ""))
+            if self._downloader.error:
+                log_error("AirPlaySource", f"Download failed: {self._downloader.error}")
+                self._closed = True
+                self._eof = True
+                return
 
-        try:
-            kwargs = {}
-            if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            if time.time() - wait_start > max_wait:
+                log_error("AirPlaySource", "Cache buffer timeout")
+                self._closed = True
+                self._eof = True
+                return
 
-            self._process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                bufsize=65536,  # Larger buffer for smoother reading
-                **kwargs
-            )
-            self._started = True
+            time.sleep(0.1)
 
-            # Update enhancer params once
-            if self._dsp_config and self._enhancer:
-                try:
-                    self._enhancer.set_params(**self._dsp_config)
-                except Exception as e:
-                    log_warning("AirPlayFFmpegDspAudioSource", f"Failed to set DSP params: {e}")
+        # Start decoder from cache file (no seek needed, cache already starts from seek position)
+        self._decoder = FFmpegDecoder(
+            DecoderConfig(
+                sample_rate=self._sample_rate,
+                channels=self._channels,
+                pcm_format=PCMFormat.S16LE,
+                seek_position=0.0,  # No seek needed, cache file already starts from seek position
+                buffer_size=65536,
+                quiet=True
+            ),
+            tag="AirPlaySource"
+        )
+        self._decoder.start(self._downloader.file_path)
 
-        except Exception as e:
-            log_error("AirPlayFFmpegDspAudioSource", f"Failed to start FFmpeg: {e}")
+        if not self._decoder.is_running:
+            log_error("AirPlaySource", "Failed to start decoder")
             self._closed = True
             self._eof = True
+            return
+
+        self._started = True
+
+        # Update enhancer params once
+        if self._dsp_config and self._enhancer:
+            try:
+                self._enhancer.set_params(**self._dsp_config)
+            except Exception as e:
+                log_warning("AirPlaySource", f"Failed to set DSP params: {e}")
 
     def _apply_dsp(self, pcm_data: bytes) -> bytes:
         """Apply DSP processing to PCM data."""
@@ -209,55 +242,59 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         Returns:
             Raw PCM bytes (16-bit signed, little endian)
         """
-        device_name = self._device.device_name
+        device_name = self._device.device_name if self._device else "Unknown"
 
         if not self._started:
-            self._start_ffmpeg()
+            # Run blocking download/decoder start in executor
+            await asyncio.get_event_loop().run_in_executor(
+                None, self._start_download_and_decoder
+            )
 
         if self._closed or self._eof:
             return AudioSource.NO_FRAMES
 
-        if not self._process or not self._process.stdout:
+        if not self._decoder or not self._decoder.is_running:
             return AudioSource.NO_FRAMES
 
         # Calculate bytes needed
         bytes_per_frame = self._channels * self.SAMPLE_SIZE
         bytes_needed = nframes * bytes_per_frame
 
-        # Read from FFmpeg stdout directly (in executor to not block event loop)
+        # Read from decoder (in executor to not block event loop)
         try:
-            # Read data in executor
             def read_data():
-                return self._process.stdout.read(bytes_needed)
+                return self._decoder.read(bytes_needed)
 
             pcm_data = await asyncio.get_event_loop().run_in_executor(None, read_data)
 
             if not pcm_data:
                 self._eof = True
-                log_debug("AirPlayFFmpegDspAudioSource", "EOF from FFmpeg")
+                log_debug("AirPlaySource", "EOF from decoder")
                 return AudioSource.NO_FRAMES
 
             if not self._first_data_received:
                 self._first_data_received = True
-                log_info("AirPlayFFmpegDspAudioSource", f"First audio data received from FFmpeg: {device_name}")
+                log_info("AirPlaySource", f"First audio data received: {device_name}")
 
                 try:
-                    await event_bus.publish_async(state_changed(self._device.device_id, state=self._device.play_state))
+                    await event_bus.publish_async(
+                        state_changed(self._device.device_id, state=self._device.play_state)
+                    )
                 except Exception as e:
-                    log_error("AirPlayFFmpegDspAudioSource.py", f"Failed to notify DLNA client of state change: {e}")
+                    log_error("AirPlaySource", f"Failed to notify state change: {e}")
 
             # Apply DSP if enhancer is available and DSP is enabled
             if self._enhancer and (not self._device or self._device.dsp_enabled):
                 try:
                     pcm_data = self._apply_dsp(pcm_data)
                 except Exception as e:
-                    log_warning("AirPlayFFmpegDspAudioSource", f"DSP error: {e}")
+                    log_warning("AirPlaySource", f"DSP error: {e}")
 
             # Convert to format expected by pyatv (byteswap on little-endian systems)
             return _to_audio_samples(pcm_data)
 
         except Exception as e:
-            log_warning("AirPlayFFmpegDspAudioSource", f"Read error: {e}")
+            log_warning("AirPlaySource", f"Read error: {e}")
             self._eof = True
             return AudioSource.NO_FRAMES
 
@@ -268,16 +305,12 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
 
         self._closed = True
 
-        # Close FFmpeg process
-        if self._process:
-            try:
-                self._process.terminate()
-                self._process.wait(timeout=2.0)
-            except:
-                try:
-                    self._process.kill()
-                except:
-                    pass
-            self._process = None
+        # Stop decoder
+        if self._decoder:
+            self._decoder.stop()
+            self._decoder = None
 
-        log_debug("AirPlayFFmpegDspAudioSource", "Closed")
+        # Stop downloader and cleanup
+        self._downloader.cleanup()
+
+        log_debug("AirPlaySource", "Closed")
