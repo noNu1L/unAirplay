@@ -126,7 +126,7 @@ class FFmpegDecoder:
             "pipe:1"  # Output to stdout / 输出到 stdout
         ])
 
-        log_info(self._tag, f"Starting decoder: {self._config.pcm_format.name}, "
+        log_debug(self._tag, f"Starting decoder: {self._config.pcm_format.name}, "
                  f"rate={self._config.sample_rate}, channels={self._config.channels}" +
                  (f", seek={self._config.seek_position}s" if self._config.seek_position > 0 else "") +
                  (", realtime" if self._config.realtime else ""))

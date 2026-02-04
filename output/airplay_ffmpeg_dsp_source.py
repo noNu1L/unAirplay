@@ -76,6 +76,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         dsp_config: Optional[dict] = None,
         duration: float = 0.0,
         device: Optional["VirtualDevice"] = None,
+        metadata: Optional[dict] = None,
     ):
         """
         Initialize FFmpeg DSP audio source.
@@ -89,6 +90,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
             dsp_config: DSP configuration parameters (initial)
             duration: Total duration in seconds (0 = unknown)
             device: VirtualDevice for live DSP config updates
+            metadata: Media metadata dict (title, artist, album)
         """
         self._url = url
         self._seek_position = seek_position
@@ -98,6 +100,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         self._dsp_config = dsp_config or {}
         self._duration = duration
         self._device = device  # For live DSP config updates
+        self._metadata = metadata or {}  # For Apple TV metadata display
 
         # FFmpeg downloader and decoder
         cache_filename = f"{device.device_id}_airplay_cache" if device else "airplay_cache"
@@ -137,8 +140,18 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         return int(self._duration)
 
     async def get_metadata(self) -> MediaMetadata:
-        """Return media metadata."""
-        return MediaMetadata(duration=self._duration if self._duration > 0 else None)
+        """Return media metadata.
+
+        # TODO: 暂未测试过 Apple TV 元数据信息显示
+        # Apple TV should display title/artist/album via DAAP tags sent over RTSP
+        # HomePod may not display this metadata in Home App (likely uses MRP protocol)
+        """
+        return MediaMetadata(
+            title=self._metadata.get("title"),
+            artist=self._metadata.get("artist"),
+            album=self._metadata.get("album"),
+            duration=self._duration if self._duration > 0 else None
+        )
 
     def _start_download_and_decoder(self):
         """Start download and wait for cache buffer, then start decoder."""
@@ -149,7 +162,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         self._downloader.start(self._url, seek_position=self._seek_position)
 
         # Wait for cache buffer (blocking)
-        log_info("AirPlaySource", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB)" +
+        log_debug("AirPlaySource", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB)" +
                  (f" (seek: {self._seek_position:.1f}s)" if self._seek_position > 0 else ""))
         wait_start = time.time()
         max_wait = 30  # seconds
@@ -157,7 +170,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         while True:
             file_size = self._downloader.get_file_size()
             if file_size >= MIN_CACHE_BYTES:
-                log_info("AirPlaySource", f"Cache buffer ready ({file_size // 1024}KB)")
+                log_debug("AirPlaySource", f"Cache buffer ready ({file_size // 1024}KB)")
                 break
 
             if self._downloader.error:
@@ -274,7 +287,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
 
             if not self._first_data_received:
                 self._first_data_received = True
-                log_info("AirPlaySource", f"First audio data received: {device_name}")
+                log_debug("AirPlaySource", f"First audio data received: {device_name}")
 
                 try:
                     await event_bus.publish_async(

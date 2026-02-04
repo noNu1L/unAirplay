@@ -286,7 +286,7 @@ class ServerSpeakerOutput:
         self._playback_start_time = time.time()
         self._is_playing = True
 
-        log_info("ServerSpeaker", f"Starting playback: {self._device.device_name}" +
+        log_debug("ServerSpeaker", f"Starting playback: {self._device.device_name}" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
 
         # Start download (from seek position if specified)
@@ -364,7 +364,7 @@ class ServerSpeakerOutput:
         # Clean up cache file
         self._downloader.cleanup_file()
 
-        log_info("ServerSpeaker", f"Audio output stopped: {self._device.device_name}")
+        log_debug("ServerSpeaker", f"Audio output stopped: {self._device.device_name}")
 
     def play(self, url: str, position: float = 0.0):
         """
@@ -377,7 +377,7 @@ class ServerSpeakerOutput:
         if not self._running:
             self.start()
         self._start_playback(url, seek_position=position)
-        log_info("ServerSpeaker", f"Playing: {self._device.device_name}")
+        log_debug("ServerSpeaker", f"Playing: {self._device.device_name}")
 
     def stop_playback(self):
         """Stop current playback and clean up cache"""
@@ -393,7 +393,7 @@ class ServerSpeakerOutput:
         # Clean up cache file
         self._downloader.cleanup_file()
 
-        log_info("ServerSpeaker", f"Playback stopped: {self._device.device_name}")
+        log_debug("ServerSpeaker", f"Playback stopped: {self._device.device_name}")
 
     def pause(self):
         """Pause playback - record position and stop (keep cache for resume)"""
@@ -402,7 +402,7 @@ class ServerSpeakerOutput:
             self._current_position += elapsed
         self._stop_playback_internal()
         # Note: Don't clean up cache file here, so we can resume later
-        log_info("ServerSpeaker", f"Paused: {self._device.device_name}")
+        log_debug("ServerSpeaker", f"Paused: {self._device.device_name}")
 
     def seek(self, position: float):
         """
@@ -412,7 +412,7 @@ class ServerSpeakerOutput:
             position: Position in seconds
         """
         if self._current_url:
-            log_info("ServerSpeaker", f"Seek to {position:.1f}s: {self._device.device_name}")
+            log_debug("ServerSpeaker", f"Seek to {position:.1f}s: {self._device.device_name}")
             # Clear queue
             while not self._audio_queue.empty():
                 try:

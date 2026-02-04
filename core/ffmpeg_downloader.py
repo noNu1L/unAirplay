@@ -174,7 +174,7 @@ class FFmpegDownloader:
         Download thread main loop
         下载线程主循环
         """
-        log_info(self._tag, f"Download started" +
+        log_debug(self._tag, f"Download started" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
         log_debug(self._tag, f"URL: {url}")
         log_debug(self._tag, f"Cache file: {self.file_path}")
@@ -214,7 +214,7 @@ class FFmpegDownloader:
             if exit_code == 0:
                 self._completed = True
                 file_size = self.get_file_size()
-                log_info(self._tag, f"Download completed: {file_size // 1024}KB")
+                log_debug(self._tag, f"Download completed: {file_size // 1024}KB")
             else:
                 error_msg = stderr.decode("utf-8", errors="ignore")[:200] if stderr else "Unknown error"
                 self._error = error_msg

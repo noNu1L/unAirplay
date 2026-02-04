@@ -398,7 +398,7 @@ class DLNAService:
         ]
 
         loop = asyncio.get_event_loop()
-        log_info("SSDP", "SSDP listener started")
+        log_debug("SSDP", "SSDP listener started")
 
         while self._running:
             try:
@@ -529,21 +529,21 @@ class DLNAService:
             response = soap_response("SetAVTransportURI", "AVTransport")
 
         elif action == "Play":
-            log_info("Playback", f"Play: {device.device_name}")
+            log_debug("Playback", f"Play: {device.device_name}")
 
             event_bus.publish(cmd_play(device.device_id, device.play_url, device.play_position))
             # TODO 大文件解码Seek行为等待时间比较长,需要缓存层解决 。已加入缓存层，但未对Seek行为读取缓存
             response = soap_response("Play", "AVTransport")
 
         elif action == "Stop":
-            log_info("Playback", f"Stop: {device.device_name}")
+            log_debug("Playback", f"Stop: {device.device_name}")
 
             # Publish stop command event
             event_bus.publish(cmd_stop(device.device_id))
             response = soap_response("Stop", "AVTransport")
 
         elif action == "Pause":
-            log_info("Playback", f"Pause: {device.device_name}")
+            log_debug("Playback", f"Pause: {device.device_name}")
 
             # Publish pause command event
             event_bus.publish(cmd_pause(device.device_id))
@@ -560,7 +560,7 @@ class DLNAService:
                 if abs(position - device.get_current_position()) < 1.0:
                     log_debug("Playback", f"Seek ignored (same position {position:.1f}s): {device.device_name}")
                 else:
-                    log_info("Playback", f"Seek to {target}: {device.device_name}")
+                    log_debug("Playback", f"Seek to {target}: {device.device_name}")
                     # Publish seek command event
                     event_bus.publish(cmd_seek(device.device_id, position))
             response = soap_response("Seek", "AVTransport")
@@ -882,7 +882,7 @@ class DLNAService:
                     "seq": 0,
                     "service": service
                 }
-                log_info("Subscribe", f"New subscription: {device.device_name} ({service})")
+                log_debug("Subscribe", f"New subscription: {device.device_name} ({service})")
 
                 if service == "AVTransport":
                     asyncio.create_task(self._send_initial_event(device, sid, callback_url))

@@ -89,7 +89,7 @@ class AirPlayOutput(BaseOutput):
             return False
 
         try:
-            log_info("AirPlayOutput", f"Connecting to: {self._device.device_name} ({self._device.airplay_address})")
+            log_debug("AirPlayOutput", f"Connecting to: {self._device.device_name} ({self._device.airplay_address})")
 
             # Scan for target device
             atvs = await pyatv.scan(
@@ -112,7 +112,7 @@ class AirPlayOutput(BaseOutput):
             self._atv = await pyatv.connect(target_atv, loop=self._loop)
             self._device.connected = True
 
-            log_info("AirPlayOutput", f"Connected to: {self._device.device_name}")
+            log_debug("AirPlayOutput", f"Connected to: {self._device.device_name}")
             return True
 
         except Exception as e:
@@ -157,8 +157,7 @@ class AirPlayOutput(BaseOutput):
                 mode_parts.append("DSP")
             mode_info = f" ({', '.join(mode_parts)})" if mode_parts else ""
 
-            log_info("AirPlayOutput", f"Playing to: {self._device.device_name}{mode_info}")
-            log_debug("AirPlayOutput", f"URL: {url[:80]}...")
+            log_debug("AirPlayOutput", f"Playing to: {self._device.device_name}{mode_info}")
 
             self._is_playing = True
 
@@ -218,10 +217,16 @@ class AirPlayOutput(BaseOutput):
             await client.initialize(core.service.properties)
 
             # Log pyatv context info
-            log_info("AirPlayOutput", f"pyatv context: sample_rate={context.sample_rate}, channels={context.channels}")
+            log_debug("AirPlayOutput", f"pyatv context: sample_rate={context.sample_rate}, channels={context.channels}")
 
             # Create AudioSource (with or without DSP)
             # Pass device for live DSP config updates
+            # Build metadata dict from device state
+            metadata = {
+                "title": self._device.play_title,
+                "artist": self._device.play_artist,
+                "album": self._device.play_album,
+            }
             self._current_source = AirPlayFFmpegDspAudioSource(
                 url=url,
                 seek_position=seek_position,
@@ -230,12 +235,16 @@ class AirPlayOutput(BaseOutput):
                 enhancer=self._enhancer,  # Always pass enhancer for live DSP toggle
                 dsp_config=dsp_config if dsp_enabled else None,
                 device=self._device,  # For live DSP config updates
+                metadata=metadata,  # For Apple TV metadata display
             )
 
             log_debug("AirPlayOutput", f"Streaming (sample_rate={context.sample_rate}, channels={context.channels}, dsp={dsp_enabled})")
 
             # Get metadata
+            # TODO: 暂未测试过 Apple TV 元数据信息显示
             file_metadata = await self._current_source.get_metadata()
+            if file_metadata.title:
+                log_debug("AirPlayOutput", f"Metadata: title={file_metadata.title}, artist={file_metadata.artist}, album={file_metadata.album}")
 
             # Handle volume
             volume = None
@@ -252,7 +261,7 @@ class AirPlayOutput(BaseOutput):
             # Send audio using our custom source
             await client.send_audio(self._current_source, file_metadata, volume=volume)
 
-            log_info("AirPlayOutput", f"Stream completed: {self._device.device_name}")
+            log_debug("AirPlayOutput", f"Stream completed: {self._device.device_name}")
 
             # Notify playback completed
             self._device.play_state = "STOPPED"
@@ -310,7 +319,7 @@ class AirPlayOutput(BaseOutput):
             except queue.Empty:
                 break
 
-        log_info("AirPlayOutput", f"Stopped: {self._device.device_name}")
+        log_debug("AirPlayOutput", f"Stopped: {self._device.device_name}")
 
     async def disconnect(self):
         """Disconnect from AirPlay device."""
@@ -321,7 +330,7 @@ class AirPlayOutput(BaseOutput):
             self._atv = None
 
         self._device.connected = False
-        log_info("AirPlayOutput", f"Disconnected: {self._device.device_name}")
+        log_debug("AirPlayOutput", f"Disconnected: {self._device.device_name}")
 
     def start_background_loop(self):
         """Start async event loop in background thread."""
@@ -508,7 +517,7 @@ class AirPlayOutput(BaseOutput):
             position = kwargs.get("position", 0)
             uri = self._device.play_url
             if uri:
-                log_info("AirPlayOutput", f"Seeking to {position}s")
+                log_debug("AirPlayOutput", f"Seeking to {position}s")
                 self.run_coroutine(self.stop())
                 self.run_coroutine(self.play_url(
                     url=uri,
