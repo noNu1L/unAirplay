@@ -1,6 +1,7 @@
 """
 IIR Mode Equalizer & Tone Processor
 
+Infinite Impulse Response
 IIR 模式均衡器与音调处理器
 
 Features:

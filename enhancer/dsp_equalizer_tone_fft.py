@@ -1,6 +1,7 @@
 """
 FFT Mode Equalizer & Tone Processor
 
+Fast Fourier Transform
 FFT 模式均衡器与音调处理器
 
 Features:
