@@ -30,7 +30,7 @@ cd unAirplay/docker
 Start the service:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 2. Run Locally
