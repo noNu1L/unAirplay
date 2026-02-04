@@ -89,7 +89,7 @@ DEFAULT_DSP_CONFIG = {
     "eq_16000": 0.0,
     "spectral_enabled": True,
     "spectral_mode": "fft",  # "iir", "fft", or "fir"
-    "highfreq_gain": 1.7,
+    "highfreq_gain": 1.3,
     "lowfreq_gain": 1.0,
     "use_compression": False,
     "compression_threshold": 0.7,

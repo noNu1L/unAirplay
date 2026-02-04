@@ -1,0 +1,47 @@
+===========================================
+  unAirplay - Version Log / 版本日志
+===========================================
+
+v1.1.0 (2026-02-04)
+-------------------
+
+1. Project Rename: DLNA-To-Airplay -> unAirplay
+   项目重命名：DLNA-To-Airplay -> unAirplay
+
+2. Web UI Redesign: More minimalist design with integrated DSP settings
+   页面重新设计：更简约的设计，DSP 设置一体化更强
+
+3. DSP Architecture Redesign: EQ & Spectral enhancement now support IIR/FFT/FIR modes.
+   Spectral gain range expanded from 1.0-2.0 to 0.5-2.0
+   DSP 架构重新设计：EQ 和频谱增强现在支持 IIR/FFT/FIR 三种模式。
+   频谱增强调整范围从 1.0-2.0 扩展至 0.5-2.0
+
+4. Cache System: Decoupled download and playback to ensure continuous playback
+   even when stream URL is interrupted
+   添加缓存系统：分离下载与播放操作，保证音乐 URL 断流情况下仍能继续播放
+
+5. Bug Fix: Fixed issue where UI still shows "playing" status after track completion
+   修复问题：修复歌曲播放完成后页面仍显示播放中的问题
+
+6. UI Enhancement: Playing devices now prioritized at the top of device list
+   界面优化：播放中的设备优先排列在设备列表顶部
+
+
+v1.0.0 (Initial Release)
+------------------------
+
+1. DLNA to AirPlay: Complete basic playback functionality from DLNA to AirPlay devices
+   DLNA 到 AirPlay：完整的从 DLNA 到 AirPlay 设备的基本播放功能
+
+2. DLNA to Server Speaker: Complete local audio output functionality
+   DLNA 到本地扬声器：完整的从 DLNA 到 Server Speaker 本地设备播放功能
+
+3. DLNA Protocol: Standard DLNA request/response flow with optimizations for
+   popular Chinese music apps (NetEase Cloud Music, QQ Music, Kugou Music,
+   Kuwo Music, Migu Music)
+   DLNA 协议：完成标准 DLNA 流程（请求、响应），并对中国常用音乐软件
+   （网易云音乐、QQ 音乐、酷狗音乐、酷我音乐、咪咕音乐）作出 DLNA 适配
+
+4. DSP Features: Implemented EQ, Spectral Enhancement (IIR/FFT),
+   Dynamic Range Compression, and Stereo Widening
+   DSP 功能：实现 EQ、频谱增强（IIR/FFT）、动态范围压缩、立体声拓宽

@@ -1,4 +1,4 @@
-# HomePod Connection Helper - 开发规范文档
+# unAirplay - 开发规范文档
 
 ## 一、项目架构概述
 
@@ -225,27 +225,65 @@
 
 #### AirPlay 输出
 ```
-URL → FFmpeg (decode to PCM) → [Optional DSP] → pyatv (ALAC encode) → AirPlay Device
+URL → FFmpegDownloader → cache file → FFmpegDecoder → [Optional DSP] → pyatv (ALAC) → AirPlay Device
 ```
 
 #### Server Speaker 输出
 ```
-URL → FFmpeg (decode to PCM) → [Optional DSP] → sounddevice → System Speaker
+URL → FFmpegDownloader → cache file → FFmpegDecoder → [Optional DSP] → sounddevice → System Speaker
 ```
 
-### 4.3 FFmpeg 调配
+### 4.3 FFmpeg 公共模块
 
-FFmpeg 作为**工具类**，由 Output 实例调配：
+FFmpeg 功能已抽取为公共模块，位于 `core/` 目录：
 
-**调配内容：**
-- 音频输入源（URL）
-- 解码参数（-acodec, -ar, -ac）
-- Seek 位置（-ss）
-- 输出格式（pipe:1）
+| 模块 | 职责 |
+|------|------|
+| `ffmpeg_utils.py` | PCMFormat 枚举、进程工具函数 |
+| `ffmpeg_downloader.py` | 下载音频到缓存文件（-c:a copy，无重编码） |
+| `ffmpeg_decoder.py` | 解码缓存文件为 PCM 流 |
 
-**实现位置：**
-- `output/airplay_ffmpeg_dsp_source.py` - AirPlay FFmpeg DSP 音频源
-- `output/server_speaker.py` 中的 `_start_decoder()` 方法
+**解耦架构（边下载边播放）：**
+```
+URL → FFmpegDownloader → cache/{device_id}_xxx.mkv → FFmpegDecoder → PCM
+         (下载线程)              (等待100KB缓冲)         (播放线程)
+```
+
+**Seek 支持：** 下载器支持从指定位置开始下载（`-ss` 参数），解码器从缓存文件头开始。
+
+**使用示例：**
+```python
+from core.ffmpeg_downloader import FFmpegDownloader, DownloaderConfig
+from core.ffmpeg_decoder import FFmpegDecoder, DecoderConfig
+from core.ffmpeg_utils import PCMFormat
+
+# 下载器
+downloader = FFmpegDownloader(DownloaderConfig(
+    cache_dir="cache",
+    cache_filename=f"{device_id}_play_cache"
+))
+downloader.start(url, seek_position=60.0)  # 从 60 秒开始下载
+
+# 解码器
+decoder = FFmpegDecoder(DecoderConfig(
+    pcm_format=PCMFormat.F32LE,  # 或 PCMFormat.S16LE
+    realtime=True
+))
+decoder.start(downloader.file_path)
+```
+
+### 4.4 音频设备检测
+
+**文件**: `output/audio_device_detector.py`
+
+**职责：**
+- 检测系统可用的音频输出设备
+- 获取默认音频输出设备
+- 列出所有音频输出设备信息
+
+**使用场景：**
+- Server Speaker 输出初始化时检测可用设备
+- Web 面板显示可用音频设备列表
 
 ---
 
@@ -255,27 +293,30 @@ FFmpeg 作为**工具类**，由 Output 实例调配：
 
 **基类**: `enhancer/base.py` - `BaseEnhancer`
 
-**实现类：**
-- `enhancer/dsp_scipy.py` - `ScipyEnhancer`（基于 scipy 的 DSP）
+**主实现类**: `enhancer/dsp_numpy2.py` - `NumpyEnhancer`
 
-### 5.2 DSP 职责
+### 5.2 DSP 模块化架构
 
-- 接收 PCM 音频数据（numpy 数组）
-- 应用音频增强（均衡器、压缩器等）
+`NumpyEnhancer` 采用模块化设计，组合以下子模块：
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| 均衡器 & 音调增强 | `dsp_equalizer_tone_iir.py` | IIR 滤波器实现（低延迟） |
+| 均衡器 & 音调增强 | `dsp_equalizer_tone_fft.py` | FFT 频域实现（高精度） |
+| 均衡器 & 音调增强 | `dsp_equalizer_tone_fir.py` | FIR 滤波器实现（线性相位） |
+| 动态压缩器 | `dsp_compression.py` | 动态范围压缩 |
+| 立体声增强 | `dsp_stereo.py` | Mid-Side 立体声处理 |
+
+**处理流程：**
+```
+音频输入 → 均衡器&音调 (IIR/FFT/FIR 三选一) → 动态压缩 → 立体声增强 → 音频输出
+```
+
+### 5.3 DSP 职责
+
+- 接收 PCM 音频数据（numpy 数组，float32，范围 [-1, 1]）
+- 应用音频增强（均衡器、音调、压缩器、立体声增强）
 - 返回处理后的 PCM 数据
-
-### 5.3 DSP 配置
-
-**配置存储：**
-- VirtualDevice.dsp_enabled - 是否启用
-- VirtualDevice.dsp_config - DSP 参数字典
-
-**配置更新流程：**
-1. Web 面板发送 DSP 配置
-2. WebServer 发布 CMD_SET_DSP 事件
-3. VirtualDevice 更新配置并发布 DSP_CHANGED 事件
-4. ConfigStore 保存配置
-5. Output 在下次播放时使用新配置
 
 ---
 
@@ -423,6 +464,5 @@ def _create_output_for_device(self, device: VirtualDevice):
 
 ---
 
-**版本**: v1.0
-**日期**: 2026-02-01
-**维护者**: HomePod Connection Helper Team
+**版本**: v1.1.0
+**日期**: 2026-02-04
