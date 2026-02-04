@@ -174,6 +174,15 @@ class FFmpegDownloader:
         Download thread main loop
         下载线程主循环
         """
+        # Ensure cache directory exists / 确保缓存目录存在
+        try:
+            os.makedirs(self._config.cache_dir, exist_ok=True)
+        except Exception as e:
+            self._error = f"Failed to create cache directory: {e}"
+            log_error(self._tag, self._error)
+            self._downloading = False
+            return
+
         log_debug(self._tag, f"Download started" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
         log_debug(self._tag, f"URL: {url}")
