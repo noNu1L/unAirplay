@@ -9,21 +9,32 @@ Features:
 - Spectral Enhancement using Shelf filters (Low-Shelf + High-Shelf)
 - Stateful processing for streaming audio
 - Zero latency (no buffering)
+- High performance using scipy.signal.sosfilt (C implementation)
+- Glitch-free parameter changes (fixed filter chain with soft bypass)
 
 Architecture:
-- Serial processing: Input -> EQ Bands -> Low-Shelf -> High-Shelf -> Output
-- Direct Form II Transposed for numerical stability
-- State preservation across audio blocks
+- Fixed SOS chain: 10 EQ bands + 2 Shelf filters = 12 sections (always)
+- Soft bypass: 0dB filters use identity SOS [1,0,0,1,0,0]
+- State preservation: zi is never reset on parameter changes
+- Single sosfilt call for maximum efficiency
 
 Based on Robert Bristow-Johnson's Audio EQ Cookbook
 """
 import numpy as np
+from scipy.signal import sosfilt
 
 from core.utils import log
 from config import SAMPLE_RATE
 
 # 10-band equalizer frequencies (Hz)
 EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+
+# Total number of filter sections (fixed)
+# 10 EQ bands + 1 Low-Shelf + 1 High-Shelf = 12
+N_SECTIONS = len(EQ_BANDS) + 2
+
+# Identity SOS (unity gain, no filtering): [b0, b1, b2, a0, a1, a2]
+IDENTITY_SOS = np.array([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
 
 
 def design_peaking_filter(freq: float, gain_db: float, q: float, sample_rate: int):
@@ -37,10 +48,10 @@ def design_peaking_filter(freq: float, gain_db: float, q: float, sample_rate: in
         sample_rate: Sample rate
 
     Returns:
-        (b, a) coefficients or None if gain_db is 0
+        SOS coefficients [b0, b1, b2, 1, a1, a2]
     """
     if abs(gain_db) < 0.01:
-        return None
+        return IDENTITY_SOS.copy()
 
     A = 10 ** (gain_db / 40.0)
     w0 = 2 * np.pi * freq / sample_rate
@@ -55,10 +66,7 @@ def design_peaking_filter(freq: float, gain_db: float, q: float, sample_rate: in
     a1 = -2 * cos_w0
     a2 = 1 - alpha / A
 
-    b = np.array([b0 / a0, b1 / a0, b2 / a0])
-    a = np.array([1.0, a1 / a0, a2 / a0])
-
-    return b, a
+    return np.array([b0 / a0, b1 / a0, b2 / a0, 1.0, a1 / a0, a2 / a0])
 
 
 def design_low_shelf(freq: float, gain_db: float, q: float, sample_rate: int):
@@ -72,10 +80,10 @@ def design_low_shelf(freq: float, gain_db: float, q: float, sample_rate: int):
         sample_rate: Sample rate
 
     Returns:
-        (b, a) coefficients or None if gain_db is 0
+        SOS coefficients [b0, b1, b2, 1, a1, a2]
     """
     if abs(gain_db) < 0.01:
-        return None
+        return IDENTITY_SOS.copy()
 
     A = 10 ** (gain_db / 40.0)
     w0 = 2 * np.pi * freq / sample_rate
@@ -93,10 +101,7 @@ def design_low_shelf(freq: float, gain_db: float, q: float, sample_rate: int):
     a1 = -2 * ((A - 1) + (A + 1) * cos_w0)
     a2 = (A + 1) + (A - 1) * cos_w0 - sqrt_A_alpha_2
 
-    b = np.array([b0 / a0, b1 / a0, b2 / a0])
-    a = np.array([1.0, a1 / a0, a2 / a0])
-
-    return b, a
+    return np.array([b0 / a0, b1 / a0, b2 / a0, 1.0, a1 / a0, a2 / a0])
 
 
 def design_high_shelf(freq: float, gain_db: float, q: float, sample_rate: int):
@@ -110,10 +115,10 @@ def design_high_shelf(freq: float, gain_db: float, q: float, sample_rate: int):
         sample_rate: Sample rate
 
     Returns:
-        (b, a) coefficients or None if gain_db is 0
+        SOS coefficients [b0, b1, b2, 1, a1, a2]
     """
     if abs(gain_db) < 0.01:
-        return None
+        return IDENTITY_SOS.copy()
 
     A = 10 ** (gain_db / 40.0)
     w0 = 2 * np.pi * freq / sample_rate
@@ -131,93 +136,7 @@ def design_high_shelf(freq: float, gain_db: float, q: float, sample_rate: int):
     a1 = 2 * ((A - 1) - (A + 1) * cos_w0)
     a2 = (A + 1) - (A - 1) * cos_w0 - sqrt_A_alpha_2
 
-    b = np.array([b0 / a0, b1 / a0, b2 / a0])
-    a = np.array([1.0, a1 / a0, a2 / a0])
-
-    return b, a
-
-
-class StatefulBiquad:
-    """
-    Stateful Biquad filter for streaming audio
-
-    Uses Direct Form II Transposed structure.
-    Maintains state across audio blocks.
-    """
-
-    def __init__(self, b=None, a=None, channels: int = 2):
-        """
-        Initialize biquad filter
-
-        Args:
-            b: Numerator coefficients [b0, b1, b2] or None for bypass
-            a: Denominator coefficients [1.0, a1, a2] or None for bypass
-            channels: Number of audio channels
-        """
-        self.channels = channels
-        self.bypass = (b is None or a is None)
-
-        if not self.bypass:
-            self.b0, self.b1, self.b2 = float(b[0]), float(b[1]), float(b[2])
-            self.a1, self.a2 = float(a[1]), float(a[2])
-        else:
-            self.b0, self.b1, self.b2 = 1.0, 0.0, 0.0
-            self.a1, self.a2 = 0.0, 0.0
-
-        # State variables for each channel
-        self._state = np.zeros((channels, 2), dtype=np.float64)
-
-    def process(self, audio: np.ndarray) -> np.ndarray:
-        """
-        Process audio through the filter
-
-        Args:
-            audio: Input audio of shape (n_samples, channels)
-
-        Returns:
-            Filtered audio of same shape
-        """
-        if self.bypass:
-            return audio
-
-        result = np.zeros_like(audio, dtype=np.float64)
-        for ch in range(min(audio.shape[1], self.channels)):
-            result[:, ch] = self._process_channel(audio[:, ch], ch)
-        return result.astype(audio.dtype)
-
-    def _process_channel(self, x: np.ndarray, ch: int) -> np.ndarray:
-        """Process single channel with state preservation"""
-        n = len(x)
-        y = np.zeros(n, dtype=np.float64)
-
-        z1, z2 = self._state[ch]
-        b0, b1, b2 = self.b0, self.b1, self.b2
-        a1, a2 = self.a1, self.a2
-
-        for i in range(n):
-            xi = float(x[i])
-            yi = b0 * xi + z1
-            z1 = b1 * xi - a1 * yi + z2
-            z2 = b2 * xi - a2 * yi
-            y[i] = yi
-
-        self._state[ch, 0] = z1
-        self._state[ch, 1] = z2
-
-        return y
-
-    def update_coefficients(self, b, a):
-        """Update filter coefficients (state preserved)"""
-        if b is None or a is None:
-            self.bypass = True
-        else:
-            self.bypass = False
-            self.b0, self.b1, self.b2 = float(b[0]), float(b[1]), float(b[2])
-            self.a1, self.a2 = float(a[1]), float(a[2])
-
-    def reset(self):
-        """Reset filter state"""
-        self._state.fill(0.0)
+    return np.array([b0 / a0, b1 / a0, b2 / a0, 1.0, a1 / a0, a2 / a0])
 
 
 class EqualizerToneIIR:
@@ -225,12 +144,16 @@ class EqualizerToneIIR:
     IIR Mode Equalizer & Tone Processor
 
     Combines 10-band graphic EQ with spectral enhancement (Low/High Shelf).
-    All processing uses IIR (Biquad) filters.
+    All processing uses IIR (Biquad) filters via scipy.signal.sosfilt.
 
-    Processing chain (serial):
-    Input -> 10x Peaking EQ -> Low-Shelf -> High-Shelf -> Output
+    Processing chain (fixed 12 sections):
+    Input -> [10x EQ + Low-Shelf + High-Shelf] -> Output
 
-    TODO: IIR 模式可以使用引入 scipy进行性能优化，但是包比较大
+    Features:
+    - Fixed filter chain size (12 sections) - no dimension changes
+    - Soft bypass using identity SOS [1,0,0,1,0,0] for 0dB bands
+    - State preservation on parameter changes - no pops/clicks
+    - scipy C implementation for ~10-50x speedup
     """
 
     def __init__(self, sample_rate: int = SAMPLE_RATE, channels: int = 2):
@@ -259,20 +182,49 @@ class EqualizerToneIIR:
         self.bass_gain = 1.0  # Linear gain (0.5-2.0)
         self.treble_gain = 1.0  # Linear gain (0.5-2.0)
 
-        # EQ filters (10 bands)
-        self._eq_filters = {}
-        for freq in EQ_BANDS:
-            self._eq_filters[freq] = StatefulBiquad(channels=channels)
+        # Fixed SOS array: always 12 sections (10 EQ + 2 Shelf)
+        # Shape: (N_SECTIONS, 6)
+        self._sos = np.tile(IDENTITY_SOS, (N_SECTIONS, 1))
 
-        # Shelf filters
-        self._low_shelf = StatefulBiquad(channels=channels)
-        self._high_shelf = StatefulBiquad(channels=channels)
+        # Filter state: shape (channels, N_SECTIONS, 2)
+        # NEVER reset on parameter changes to avoid pops/clicks
+        self._zi = np.zeros((channels, N_SECTIONS, 2))
 
-        # Current dB values for shelf filters (for change detection)
-        self._current_bass_db = 0.0
-        self._current_treble_db = 0.0
+        # Flag to update SOS coefficients
+        self._needs_update = True
 
-        log("DSP", f"EqualizerToneIIR initialized: {len(EQ_BANDS)} EQ bands + 2 Shelf filters")
+        log("DSP", f"EqualizerToneIIR initialized (scipy.sosfilt, fixed {N_SECTIONS} sections)")
+
+    def _update_sos(self):
+        """Update SOS coefficients without resetting state"""
+        # EQ bands (sections 0-9)
+        for i, freq in enumerate(EQ_BANDS):
+            if self.eq_enabled and self.eq_gains[freq] != 0:
+                self._sos[i] = design_peaking_filter(
+                    freq, self.eq_gains[freq], self.eq_q, self.sample_rate
+                )
+            else:
+                self._sos[i] = IDENTITY_SOS.copy()
+
+        # Low-Shelf (section 10)
+        if self.spectral_enabled and self.bass_gain != 1.0:
+            bass_db = self._gain_to_db(self.bass_gain)
+            self._sos[10] = design_low_shelf(
+                self.low_shelf_freq, bass_db, self.shelf_q, self.sample_rate
+            )
+        else:
+            self._sos[10] = IDENTITY_SOS.copy()
+
+        # High-Shelf (section 11)
+        if self.spectral_enabled and self.treble_gain != 1.0:
+            treble_db = self._gain_to_db(self.treble_gain)
+            self._sos[11] = design_high_shelf(
+                self.high_shelf_freq, treble_db, self.shelf_q, self.sample_rate
+            )
+        else:
+            self._sos[11] = IDENTITY_SOS.copy()
+
+        self._needs_update = False
 
     def set_eq_gains(self, **kwargs):
         """
@@ -287,16 +239,7 @@ class EqualizerToneIIR:
                 new_gain = kwargs[key]
                 if new_gain != self.eq_gains[freq]:
                     self.eq_gains[freq] = new_gain
-                    self._update_eq_filter(freq, new_gain)
-
-    def _update_eq_filter(self, freq: int, gain_db: float):
-        """Update a single EQ filter's coefficients"""
-        result = design_peaking_filter(freq, gain_db, self.eq_q, self.sample_rate)
-        if result:
-            b, a = result
-            self._eq_filters[freq].update_coefficients(b, a)
-        else:
-            self._eq_filters[freq].update_coefficients(None, None)
+                    self._needs_update = True
 
     def set_spectral_gains(self, bass_gain: float = None, treble_gain: float = None):
         """
@@ -306,27 +249,13 @@ class EqualizerToneIIR:
             bass_gain: Low frequency gain (0.5-2.0, linear)
             treble_gain: High frequency gain (0.5-2.0, linear)
         """
-        if bass_gain is not None:
+        if bass_gain is not None and bass_gain != self.bass_gain:
             self.bass_gain = bass_gain
-            bass_db = self._gain_to_db(bass_gain)
-            if abs(bass_db - self._current_bass_db) > 0.1:
-                self._current_bass_db = bass_db
-                result = design_low_shelf(self.low_shelf_freq, bass_db, self.shelf_q, self.sample_rate)
-                if result:
-                    self._low_shelf.update_coefficients(*result)
-                else:
-                    self._low_shelf.update_coefficients(None, None)
+            self._needs_update = True
 
-        if treble_gain is not None:
+        if treble_gain is not None and treble_gain != self.treble_gain:
             self.treble_gain = treble_gain
-            treble_db = self._gain_to_db(treble_gain)
-            if abs(treble_db - self._current_treble_db) > 0.1:
-                self._current_treble_db = treble_db
-                result = design_high_shelf(self.high_shelf_freq, treble_db, self.shelf_q, self.sample_rate)
-                if result:
-                    self._high_shelf.update_coefficients(*result)
-                else:
-                    self._high_shelf.update_coefficients(None, None)
+            self._needs_update = True
 
     def _gain_to_db(self, gain: float) -> float:
         """Convert linear gain to dB"""
@@ -336,10 +265,12 @@ class EqualizerToneIIR:
 
     def set_enabled(self, eq_enabled: bool = None, spectral_enabled: bool = None):
         """Set enable flags"""
-        if eq_enabled is not None:
+        if eq_enabled is not None and eq_enabled != self.eq_enabled:
             self.eq_enabled = eq_enabled
-        if spectral_enabled is not None:
+            self._needs_update = True
+        if spectral_enabled is not None and spectral_enabled != self.spectral_enabled:
             self.spectral_enabled = spectral_enabled
+            self._needs_update = True
 
     def process(self, audio: np.ndarray) -> np.ndarray:
         """
@@ -351,31 +282,27 @@ class EqualizerToneIIR:
         Returns:
             Processed audio of same shape
         """
-        result = audio.astype(np.float64)
+        # Update SOS coefficients if parameters changed (state preserved)
+        if self._needs_update:
+            self._update_sos()
 
-        # 1. Apply 10-band EQ
-        if self.eq_enabled:
-            for freq in EQ_BANDS:
-                if self.eq_gains[freq] != 0:
-                    result = self._eq_filters[freq].process(result)
+        result = np.zeros_like(audio, dtype=np.float64)
+        n_channels = min(audio.shape[1], self.channels)
 
-        # 2. Apply Spectral (Shelf filters)
-        if self.spectral_enabled:
-            # Low-Shelf
-            if self.bass_gain != 1.0:
-                result = self._low_shelf.process(result)
-            # High-Shelf
-            if self.treble_gain != 1.0:
-                result = self._high_shelf.process(result)
+        for ch in range(n_channels):
+            # sosfilt returns (output, final_state)
+            result[:, ch], self._zi[ch] = sosfilt(
+                self._sos,
+                audio[:, ch].astype(np.float64),
+                zi=self._zi[ch]
+            )
 
         return result.astype(np.float32)
 
     def reset(self):
-        """Reset all filter states"""
-        for filt in self._eq_filters.values():
-            filt.reset()
-        self._low_shelf.reset()
-        self._high_shelf.reset()
+        """Reset all filter states (use sparingly - causes click)"""
+        self._zi.fill(0.0)
+        self._needs_update = True
 
     def get_params(self) -> dict:
         """Get current parameters"""
