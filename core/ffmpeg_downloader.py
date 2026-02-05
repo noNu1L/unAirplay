@@ -211,15 +211,19 @@ class FFmpegDownloader:
                 **get_subprocess_kwargs()
             )
 
+            # Keep local reference to avoid race condition with stop()
+            # 保存本地引用以避免与 stop() 的竞态条件
+            process = self._process
+
             # Wait for process to complete / 等待进程完成
-            _, stderr = self._process.communicate()
-            exit_code = self._process.returncode
+            _, stderr = process.communicate()
 
             if not self._downloading:
                 # Manually stopped / 被手动停止
                 log_debug(self._tag, "Download cancelled")
                 return
 
+            exit_code = process.returncode
             if exit_code == 0:
                 self._completed = True
                 file_size = self.get_file_size()
