@@ -521,6 +521,7 @@ class DLNAService:
                 metadata_match = re.search(r"<CurrentURIMetaData>([^<]*)</CurrentURIMetaData>", body)
                 if metadata_match:
                     metadata = self._decode_xml_entities(metadata_match.group(1))
+                    log_debug("SetAVTransportURI", f"metadata:\n{metadata}\n--- end ---")
                     self._parse_metadata(device, metadata)
 
                 # Probe media info asynchronously (non-blocking)
@@ -616,7 +617,7 @@ class DLNAService:
             else:  # STOPPED
                 actions = "Play"
             response = soap_response("GetCurrentTransportActions", "AVTransport",
-                                   f"<Actions>{actions}</Actions>")
+                                     f"<Actions>{actions}</Actions>")
 
         else:
             response = soap_response(action or "Unknown", "AVTransport")
@@ -645,7 +646,7 @@ class DLNAService:
                     volume = device.volume if hasattr(device, 'volume') else 100
 
             response = soap_response("GetVolume", "RenderingControl",
-                                   f"<CurrentVolume>{volume}</CurrentVolume>")
+                                     f"<CurrentVolume>{volume}</CurrentVolume>")
 
         elif action == "SetVolume":
             match = re.search(r"<DesiredVolume>(\d+)</DesiredVolume>", body)
@@ -669,7 +670,7 @@ class DLNAService:
 
             mute_val = "1" if muted else "0"
             response = soap_response("GetMute", "RenderingControl",
-                                   f"<CurrentMute>{mute_val}</CurrentMute>")
+                                     f"<CurrentMute>{mute_val}</CurrentMute>")
 
         elif action == "SetMute":
             match = re.search(r"<DesiredMute>(\d+)</DesiredMute>", body)
@@ -689,7 +690,7 @@ class DLNAService:
     async def _handle_connection_manager_ctl(self, request: web.Request):
         """Handle ConnectionManager requests"""
         response = soap_response("GetProtocolInfo", "ConnectionManager",
-                               f"<Source></Source><Sink>{SINK_FORMATS}</Sink>")
+                                 f"<Source></Source><Sink>{SINK_FORMATS}</Sink>")
         return web.Response(text=response, content_type="text/xml", charset="utf-8")
 
     def _parse_metadata(self, device: "VirtualDevice", metadata: str):
@@ -725,25 +726,48 @@ class DLNAService:
         device.play_cover_url = cover_url
         device.play_duration = device.parse_time(duration_str)
 
-        log_info("Metadata", f"\n\ttitle:  {title}\n\tartist: {artist}\n\talbum:  {album}\n\tduration: {duration_str}")
+        # log_info("Metadata", f"\n\ttitle:  {title}\n\tartist: {artist}\n\talbum:  {album}\n\tduration: {duration_str}")
 
     async def _probe_and_update_media_info(self, device: "VirtualDevice", url: str):
         """
         Probe media info using FFprobe and update device audio info.
         This runs asynchronously to avoid blocking the DLNA response.
+
+        Updates:
+        - Audio technical info: codec, sample_rate, channels, bitrate
+        - Supplements missing metadata: title, artist, album, duration (when DLNA lacks them)
         """
         try:
             media_info = await probe_media(url, timeout=10.0)
             if media_info:
+                # Update audio technical info
                 device.audio_format = media_info.get("codec", "")
                 device.audio_sample_rate = media_info.get("sample_rate", 0)
                 device.audio_channels = media_info.get("channels", 0)
                 device.audio_bitrate = format_bitrate(media_info.get("bitrate", 0))
 
-                log_info("MediaInfo", f"codec={device.audio_format}, "
-                         f"sample_rate={device.audio_sample_rate}Hz, "
-                         f"bitrate={device.audio_bitrate}, "
-                         f"channels={device.audio_channels}")
+                # Supplement missing metadata from ffprobe (when DLNA lacks them)
+                if (not device.play_title or device.play_title == "None") and media_info.get("title"):
+                    device.play_title = media_info["title"]
+                if (not device.play_artist or device.play_artist == "None") and media_info.get("artist"):
+                    device.play_artist = media_info["artist"]
+                if (not device.play_album or device.play_album == "None") and media_info.get("album"):
+                    device.play_album = media_info["album"]
+                if device.play_duration == 0 and media_info.get("duration", 0) > 0:
+                    device.play_duration = media_info["duration"]
+
+                log_info("Metadata",
+                         f"\n\ttitle:  {device.play_title}"
+                         f"\n\tartist: {device.play_artist}"
+                         f"\n\talbum:  {device.play_album}"
+                         f"\n\tduration: {device._format_time(device.play_duration)}"
+                         )
+
+                log_debug(f"\n\tformat: {device.audio_format}"
+                          f"\n\tsample rate: {device.audio_sample_rate}"
+                          f"\n\tbitrate: {device.audio_bitrate}"
+                          )
+
         except Exception as e:
             log_warning("MediaInfo", f"Failed to probe media: {e}")
 
@@ -794,7 +818,7 @@ class DLNAService:
         expired_sids = []
 
         for sid, sub_info in subscribers.items():
-            #TODO  订阅设备过期问题待修复
+            # TODO  订阅设备过期问题待修复
             if sub_info["expires"] < now:
                 expired_sids.append(sid)
                 continue
@@ -816,11 +840,11 @@ class DLNAService:
                         "Content-Type": "text/xml; charset=utf-8",
                     }
                     async with session.request(
-                        "NOTIFY",
-                        callback_url,
-                        headers=headers,
-                        data=event_xml,
-                        timeout=aiohttp.ClientTimeout(total=5)
+                            "NOTIFY",
+                            callback_url,
+                            headers=headers,
+                            data=event_xml,
+                            timeout=aiohttp.ClientTimeout(total=5)
                     ) as resp:
                         if resp.status < 300:
                             log_debug("Event", f"Notification sent: {device.play_state} -> {device.device_name}")
@@ -916,11 +940,11 @@ class DLNAService:
                     "Content-Type": "text/xml; charset=utf-8",
                 }
                 async with session.request(
-                    "NOTIFY",
-                    callback_url,
-                    headers=headers,
-                    data=event_xml,
-                    timeout=aiohttp.ClientTimeout(total=5)
+                        "NOTIFY",
+                        callback_url,
+                        headers=headers,
+                        data=event_xml,
+                        timeout=aiohttp.ClientTimeout(total=5)
                 ) as resp:
                     log_debug("Subscribe", f"Initial event sent: {resp.status}")
         except Exception as e:

@@ -26,7 +26,10 @@ async def probe_media(url: str, timeout: float = 10.0) -> Optional[Dict[str, Any
             "sample_rate": 44100,
             "bitrate": 320000,
             "channels": 2,
-            "duration": 235.5
+            "duration": 235.5,
+            "title": "Song Title",
+            "artist": "Artist Name",
+            "album": "Album Name"
         }
         Returns None if probe fails.
     """
@@ -79,7 +82,10 @@ async def probe_media(url: str, timeout: float = 10.0) -> Optional[Dict[str, Any
             "sample_rate": int(audio_stream.get("sample_rate", 0)),
             "channels": int(audio_stream.get("channels", 0)),
             "bitrate": 0,
-            "duration": 0.0
+            "duration": 0.0,
+            "title": "",
+            "artist": "",
+            "album": ""
         }
 
         # Bitrate: try stream first, then format
@@ -93,6 +99,18 @@ async def probe_media(url: str, timeout: float = 10.0) -> Optional[Dict[str, Any
             result["duration"] = float(audio_stream["duration"])
         elif "duration" in format_info:
             result["duration"] = float(format_info["duration"])
+
+        # Metadata tags: extract from format.tags (ID3, Vorbis, etc.)
+        tags = format_info.get("tags", {})
+        # Tag keys may be uppercase or lowercase depending on format
+        for key in tags:
+            key_lower = key.lower()
+            if key_lower == "title":
+                result["title"] = tags[key]
+            elif key_lower == "artist":
+                result["artist"] = tags[key]
+            elif key_lower == "album":
+                result["album"] = tags[key]
 
         log_debug("FFprobe", f"Media info: codec={result['codec']}, "
                   f"sample_rate={result['sample_rate']}, "
