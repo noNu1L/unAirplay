@@ -2,6 +2,57 @@
   unAirplay - Version Log / 版本日志
 ===========================================
 
+v1.1.1 (2026-02-06)
+-------------------
+
+1. Bug Fix: Streaming Audio Support
+   修复问题：流媒体音频支持
+
+   - Automatic detection of streaming sources using ffprobe (duration=0 or >24 hours)
+   - Skip cache for streaming sources to reduce latency
+   - Direct URL decoding for streaming audio
+
+   使用 ffprobe 自动检测流媒体源（时长为0或>24小时）
+   流媒体源跳过缓存以降低延迟
+   流媒体音频直接 URL 解码
+
+2. Feature: AirPlay Device Exclusion
+   新功能：AirPlay 设备排除功能
+
+   - Added AIRPLAY_EXCLUDE configuration to exclude devices by IP or name
+   - Useful for filtering out unwanted AirPlay devices
+
+   添加 AIRPLAY_EXCLUDE 配置，可按 IP 或名称排除设备
+   用于过滤不需要的 AirPlay 设备
+
+3. Bug Fix: Fixed missing XML metadata with ffprobe parsing
+   修复问题：修复 ffprobe 解析时缺失 XML 元数据的问题
+
+   - Improved metadata extraction from DLNA requests
+   - Better handling of malformed XML metadata
+
+   改进从 DLNA 请求中提取元数据
+   更好地处理格式错误的 XML 元数据
+
+4. Bug Fix: Fixed errors when switching between multiple DLNA clients during playback download
+   修复问题：修复播放下载期间在多个 DLNA 客户端之间切换时的错误
+
+   - Proper cleanup of download threads when switching clients
+   - Prevent race conditions during client handover
+
+   切换客户端时正确清理下载线程
+   防止客户端切换期间的竞态条件
+
+5. Cleanup: Removed old config file format compatibility handling
+   清理：移除旧配置文件格式兼容性处理
+
+   - Simplified configuration loading logic
+   - Removed legacy format support
+
+   简化配置加载逻辑
+   移除旧格式支持
+
+
 v1.1.0 (2026-02-04)
 -------------------
 
