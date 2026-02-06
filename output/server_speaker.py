@@ -293,6 +293,9 @@ class ServerSpeakerOutput:
         self._playback_start_time = time.time()
         self._is_playing = True
 
+        # Clear play_url to avoid using stale URL from previous playback
+        self.play_url = None
+
         log_debug("ServerSpeaker", f"Starting playback: {self._device.device_name}" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
 
