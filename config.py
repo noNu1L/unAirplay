@@ -79,7 +79,7 @@ AIRPLAY_EXCLUDE = []
 # 设备离线检测配置
 # Device will be removed after this many consecutive failed scans
 # 设备连续多少次扫描未检测到后，删除虚拟设备
-AIRPLAY_OFFLINE_THRESHOLD = 3
+AIRPLAY_OFFLINE_THRESHOLD = 10
 
 # ================= Server Speaker Configuration =================
 # Whether to enable the Server Speaker virtual device (output to the local speaker of the server)
