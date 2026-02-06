@@ -59,7 +59,6 @@ The project supports automatic discovery and configuration, usually ready to use
 
 ## FAQ
 
-- **Software Compatibility**: Currently compatible with DLNA playback from NetEase Cloud Music, QQ Music, Kugou Music, Kuwo Music, and Migu Music. If media information shows as "None" on the Web page, it means the corresponding music software did not include that metadata when streaming.
 - **About Audio Quality**: Some Android music apps may have lower original stream quality when pushing from non-playback screens (i.e., non-direct URL push mode). In this case, enabling spectral enhancement in DSP can improve the listening experience to some extent.
 - **Current Song Finishes but Next Song Doesn't Play**: If this happens when using in-app DLNA casting on Android, try disabling "Ignore Battery Optimization" or removing the app from the "High Power Consumption Whitelist" in your phone's battery settings.
 - **About DSP Modes**: Performance: FIR <= FFT < IIR. Quality: FIR >= FFT > IIR. IIR mode is recommended for low-performance devices due to its minimal resource usage.
