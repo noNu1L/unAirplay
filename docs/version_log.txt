@@ -2,7 +2,7 @@
   unAirplay - Version Log / 版本日志
 ===========================================
 
-v1.1.2 (2026-02-06)
+v1.1.2 (2026-02-07)
 -------------------
 
 1. Feature: AirPlay Device Offline Detection and Auto-Removal
@@ -26,6 +26,19 @@ v1.1.2 (2026-02-06)
    设备短暂离线后重新上线时，连接状态现在能正确更新
    AirPlayScanner 检测到重连并触发状态更新
    确保设备重新上线时 device.connected 标志被设置为 True
+
+3. Bug Fix: Fixed pyatv connection not re-established after device reconnection
+   修复问题：修复设备重连后 pyatv 连接未重新建立的问题
+
+   - Implemented dual protection mechanism: proactive reconnection + reactive detection
+   - DeviceManager now automatically re-establishes pyatv connection when device reconnects
+   - AirPlayOutput validates connection before playback and reconnects if necessary
+   - Resolves "BlockedStateError: stream is blocked" error after device reconnection
+
+   实现双重保护机制：主动重连 + 被动检测
+   DeviceManager 在检测到设备重连时自动重新建立 pyatv 连接
+   AirPlayOutput 在播放前验证连接有效性，必要时自动重连
+   解决设备重连后出现 "BlockedStateError: stream is blocked" 错误
 
 v1.1.1 (2026-02-06)
 -------------------

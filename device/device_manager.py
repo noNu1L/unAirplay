@@ -10,7 +10,7 @@ This module manages the lifecycle of virtual devices:
 import asyncio
 from typing import Dict, List, Optional, Any, Callable
 
-from core.utils import log_info, log_debug, log_warning
+from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
 from core.events import EventType, device_added, device_removed, device_connected, device_disconnected, cmd_stop
 from core.config_store import config_store
@@ -81,6 +81,19 @@ class DeviceManager:
                 device.connected = True
                 log_debug("DeviceManager", f"Updated AirPlay device: {device.device_name}")
 
+                # Re-establish pyatv connection for reconnected device
+                output = device.get_output()
+                if output and hasattr(output, 'run_coroutine'):
+                    try:
+                        if hasattr(output, 'loop') and output.loop:
+                            log_info("DeviceManager", f"Re-establishing connection: {device.device_name}")
+                            asyncio.run_coroutine_threadsafe(
+                                self._reconnect_output(output, device.device_name),
+                                self._loop
+                            )
+                    except Exception as e:
+                        log_warning("DeviceManager", f"Reconnection scheduling failed: {e}")
+
                 # Publish connected event
                 event_bus.publish(device_connected(device_id))
             return
@@ -109,6 +122,35 @@ class DeviceManager:
 
         # Publish device added event
         event_bus.publish(device_added(device.device_id, device.to_dict()))
+
+    async def _reconnect_output(self, output, device_name: str):
+        """
+        Reconnect output after device reconnection.
+
+        Args:
+            output: AirPlayOutput instance
+            device_name: Device name for logging
+        """
+        try:
+            # Disconnect stale connection
+            if hasattr(output, 'disconnect'):
+                await output.disconnect()
+                log_debug("DeviceManager", f"Disconnected stale connection: {device_name}")
+
+            # Brief delay for cleanup
+            await asyncio.sleep(0.2)
+
+            # Establish new connection
+            if hasattr(output, 'connect'):
+                success = await output.connect()
+                if success:
+                    log_info("DeviceManager", f"Reconnection successful: {device_name}")
+                else:
+                    log_warning("DeviceManager", f"Reconnection failed: {device_name}")
+        except Exception as e:
+            log_error("DeviceManager", f"Reconnection error: {e}")
+            import traceback
+            log_debug("DeviceManager", traceback.format_exc())
 
     def _on_airplay_lost(self, airplay_id: str):
         """

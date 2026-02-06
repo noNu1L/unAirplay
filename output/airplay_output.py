@@ -119,6 +119,41 @@ class AirPlayOutput(BaseOutput):
             log_error("AirPlayOutput", f"Connection failed: {e}")
             return False
 
+    async def _ensure_connected(self) -> bool:
+        """
+        Ensure pyatv connection is valid, reconnect if necessary.
+
+        Returns:
+            True if connected, False if connection failed
+        """
+        # No connection exists
+        if self._atv is None:
+            log_warning("AirPlayOutput", f"No connection: {self._device.device_name}, connecting...")
+            return await self.connect()
+
+        # Verify connection is still valid
+        try:
+            # Check if stream interface is accessible
+            # This will raise BlockedStateError if connection is stale
+            if hasattr(self._atv, 'stream') and self._atv.stream:
+                log_debug("AirPlayOutput", f"Connection valid: {self._device.device_name}")
+                return True
+            else:
+                # Connection stale
+                log_warning("AirPlayOutput", f"Stale connection: {self._device.device_name}, reconnecting...")
+                await self.disconnect()
+                await asyncio.sleep(0.2)
+                return await self.connect()
+        except Exception as e:
+            # Connection broken
+            log_warning("AirPlayOutput", f"Connection broken: {self._device.device_name} ({e}), reconnecting...")
+            try:
+                await self.disconnect()
+            except:
+                pass
+            await asyncio.sleep(0.2)
+            return await self.connect()
+
     async def play_url(
         self,
         url: str,
@@ -141,8 +176,9 @@ class AirPlayOutput(BaseOutput):
         Returns:
             True if started successfully
         """
-        if not self._atv:
-            log_warning("AirPlayOutput", "Not connected")
+        # Check connection before playback
+        if not await self._ensure_connected():
+            log_error("AirPlayOutput", f"Playback failed: no connection to {self._device.device_name}")
             return False
 
         # Use lock to prevent concurrent stream operations
