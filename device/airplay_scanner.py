@@ -2,14 +2,13 @@
 AirPlayScanner - Discover AirPlay devices on the network
 """
 import asyncio
-import sys
 from typing import List, Dict, Any, Optional, Callable
 
 import pyatv
 from pyatv.const import Protocol
 
 from core.utils import log_info, log_debug, log_warning
-from config import AIRPLAY_SCAN_TIMEOUT, AIRPLAY_SCAN_INTERVAL
+from config import AIRPLAY_SCAN_TIMEOUT, AIRPLAY_SCAN_INTERVAL, AIRPLAY_EXCLUDE
 
 
 class AirPlayScanner:
@@ -59,6 +58,11 @@ class AirPlayScanner:
 
             discovered = []
             for atv in atvs:
+                device_address = str(atv.address)
+                if (device_address in AIRPLAY_EXCLUDE
+                        or atv.name in AIRPLAY_EXCLUDE):
+                    continue
+
                 # Extract device model (convert enum to string)
                 model = "Unknown"
                 if atv.device_info and atv.device_info.model:
@@ -67,7 +71,7 @@ class AirPlayScanner:
                 device_info = {
                     "name": atv.name,
                     "identifier": atv.identifier,
-                    "address": str(atv.address),
+                    "address": device_address,
                     "model": model,
                     "services": [
                         str(service.protocol).split(".")[-1]

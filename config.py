@@ -6,7 +6,7 @@ import uuid
 
 # ================= Application Info =================
 APP_NAME = "unAirplay"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 # ================= Network Configuration =================
 HTTP_PORT = 6088
@@ -65,6 +65,10 @@ AIRPLAY_SCAN_INTERVAL = 30
 
 # Timeout for AirPlay device discovery (seconds)
 AIRPLAY_SCAN_TIMEOUT = 5
+
+# Exclude devices by IP address or name
+# 按IP或名字地址排除设备，例如: ["192.168.1.100", "小喇叭"]
+AIRPLAY_EXCLUDE = []
 
 # ================= Server Speaker Configuration =================
 # Whether to enable the Server Speaker virtual device (output to the local speaker of the server)
