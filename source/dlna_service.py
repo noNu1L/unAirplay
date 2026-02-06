@@ -31,20 +31,6 @@ The app sends a direct network URL as the playback source
     Control: Playback control is decoupled; FFmpeg handles streaming independently while the app syncs playback progress. A new URL is sent whenever the song changes.
     Audio Quality: High (mostly up to 320kbps).
 
-
-DLNA属性值适配情况(安卓) 为 N 则说明客户端请求body不包含这些内容，则无法显示
-DLNA attribute value compatibility (Android) If it is set to N,
- it indicates that the client's request body does not contain these contents, and thus cannot be displayed.
-
-        NetEase Cloud Music  | QQ Music |Kugou Music|Kuwo Music|Migu Music
-                    网易云音乐   QQ音乐      酷狗音乐      酷我音乐     咪咕音乐
-title                  Y        Y           Y           Y            Y
-album_match            Y        Y           N           N            N
-artist_match           Y        Y           Y           Y            N
-album_art_match        Y        Y           Y           Y            Y
-
-
-
 """
 import asyncio
 import re
@@ -75,6 +61,7 @@ if TYPE_CHECKING:
 def extract_client_ip(callback_url: str) -> Optional[str]:
     """
     Extract client IP address from callback URL.
+    从callback URL转换为 ip
 
     "http://192.168.100.41:8058/callback" -> "192.168.100.41"
     """
@@ -301,6 +288,7 @@ def soap_response(action: str, service: str, params: str = "") -> str:
 def soap_error_response(error_code: int, error_description: str = "") -> str:
     """
     Generate UPnP SOAP error response
+    构建错误响应，用于行为：未订阅播放，非活跃设备调整音量及控制播放的越权行为
 
     Args:
         error_code: UPnP error code (e.g., 701, 702, 402)
@@ -399,6 +387,7 @@ class DLNAService:
         """
         Handle state change events from VirtualDevice.
 
+        当播放状态变更时会自动通知订阅设备
         Sends UPnP GENA event notifications to subscribed control points.
         """
         device_id = event.device_id
@@ -534,9 +523,6 @@ class DLNAService:
                             notify = self._build_notify(device, nt)
                             self._ssdp_socket.sendto(notify, (SSDP_MULTICAST_ADDR, SSDP_PORT))
 
-                    device_count = len(self._device_manager.get_all_devices())
-                    log_debug("SSDP", f"NOTIFY sent for {device_count} device(s)")
-
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -651,7 +637,7 @@ class DLNAService:
                 )
 
         if action == "SetAVTransportURI":
-            log_debug("SetAVTransportURI", f"body:\n{body}\n--- end ---")
+            log_debug("SetAVTransportURI", f"{req_ip} -> body:\n{body}")
             match = re.search(r"<CurrentURI>([^<]*)</CurrentURI>", body)
             if match:
                 uri = self._decode_xml_entities(match.group(1))
@@ -668,7 +654,7 @@ class DLNAService:
                 metadata_match = re.search(r"<CurrentURIMetaData>([^<]*)</CurrentURIMetaData>", body)
                 if metadata_match:
                     metadata = self._decode_xml_entities(metadata_match.group(1))
-                    log_debug("SetAVTransportURI", f"metadata:\n{metadata}\n--- end ---")
+                    log_debug("SetAVTransportURI", f"metadata:\n{metadata}")
                     self._parse_metadata(device, metadata)
 
                 # Probe media info asynchronously (non-blocking)
@@ -677,7 +663,7 @@ class DLNAService:
             response = soap_response("SetAVTransportURI", "AVTransport")
 
         elif action == "Play":
-            log_debug("Playback", f"Play: {device.device_name}")
+            log_debug("Playback", f"{req_ip} -> Play Device Name: {device.device_name}")
             subscribers = self._get_device_subscribers(device.device_id)
 
             # 优先级策略：
@@ -713,14 +699,14 @@ class DLNAService:
             response = soap_response("Play", "AVTransport")
 
         elif action == "Stop":
-            log_debug("Playback", f"Stop: {device.device_name},req_ip: {req_ip}")
+            log_debug("Playback", f"{req_ip} -> Stop: {device.device_name}")
 
             # Publish stop command event
             event_bus.publish(cmd_stop(device.device_id))
             response = soap_response("Stop", "AVTransport")
 
         elif action == "Pause":
-            log_debug("Playback", f"Pause: {device.device_name}")
+            log_debug("Playback", f"{req_ip} ->Pause: {device.device_name}")
 
             # Publish pause command event
             event_bus.publish(cmd_pause(device.device_id))
@@ -777,7 +763,7 @@ class DLNAService:
             if abs(position - device.get_current_position()) < 1.0:
                 log_debug("Playback", f"Seek ignored (same position {position:.1f}s): {device.device_name}")
             else:
-                log_debug("Playback", f"Seek to {target}: {device.device_name}")
+                log_debug("Playback", f"{req_ip} -> Seek to {target}: {device.device_name}")
                 # Publish seek command event
                 event_bus.publish(cmd_seek(device.device_id, position))
 
@@ -796,14 +782,14 @@ class DLNAService:
       <AbsTime>{position_str}</AbsTime>
       <RelCount>2147483647</RelCount>
       <AbsCount>2147483647</AbsCount>""")
-            log_debug("GetPositionInfo", f"Position: {position_str}")
+            log_debug("GetPositionInfo", f"{req_ip} -> Position: {position_str}")
 
         elif action == "GetTransportInfo":
             response = soap_response("GetTransportInfo", "AVTransport", f"""
       <CurrentTransportState>{device.play_state}</CurrentTransportState>
       <CurrentTransportStatus>OK</CurrentTransportStatus>
       <CurrentSpeed>1</CurrentSpeed>""")
-
+            log_debug("GetTransportInfo", f"{req_ip} -> PlayState: {device.play_state}")
         elif action == "GetMediaInfo":
             duration_str = device.format_duration()
             uri_escaped = xml_escape(device.play_url) if device.play_url else ""
@@ -817,7 +803,7 @@ class DLNAService:
       <PlayMedium>NETWORK</PlayMedium>
       <RecordMedium>NOT_IMPLEMENTED</RecordMedium>
       <WriteStatus>NOT_IMPLEMENTED</WriteStatus>""")
-
+            log_debug("GetMediaInfo", f"{req_ip} -> Duration: {duration_str} UriEscaped: {uri_escaped}")
         # [DLNA standard] GetCurrentTransportActions - return available actions based on state
         elif action == "GetCurrentTransportActions":
             # Return available actions based on current state
@@ -831,14 +817,9 @@ class DLNAService:
                 actions = "Play"
             response = soap_response("GetCurrentTransportActions", "AVTransport",
                                      f"<Actions>{actions}</Actions>")
-
+            log_debug("GetCurrentTransportActions", f"{req_ip} -> Actions: {actions}")
         else:
             response = soap_response(action or "Unknown", "AVTransport")
-
-        # log_debug("GetCurrentTransportActions-1", f"Action: {action}")
-        # log_debug("GetCurrentTransportActions-2", f"response: {response}")
-        # log_debug("GetCurrentTransportActions-3", f"req_ip: {req_ip}")
-
         return web.Response(text=response, content_type="text/xml", charset="utf-8")
 
     async def _handle_rendering_control_ctl(self, request: web.Request):
@@ -1013,8 +994,12 @@ class DLNAService:
         Updates:
         - Audio technical info: codec, sample_rate, channels, bitrate
         - Supplements missing metadata: title, artist, album, duration (when DLNA lacks them)
+        - Detects if source is streaming (duration=0 or very large)
+        - Sets seek position to latest for streaming sources (if configured)
         """
         try:
+            from config import STREAMING_SEEK_TO_LATEST
+
             media_info = await probe_media(url, timeout=10.0)
             if media_info:
                 # Update audio technical info
@@ -1022,6 +1007,18 @@ class DLNAService:
                 device.audio_sample_rate = media_info.get("sample_rate", 0)
                 device.audio_channels = media_info.get("channels", 0)
                 device.audio_bitrate = format_bitrate(media_info.get("bitrate", 0))
+
+                # Detect streaming source (duration=0 or > 24 hours)
+                duration = media_info.get("duration", 0)
+                device.is_streaming = (duration == 0 or duration > 86400)
+
+                if device.is_streaming:
+                    log_info("MediaInfo", f"Detected streaming source (duration: {duration})")
+
+                    # If configured, set play position to latest (current duration)
+                    if STREAMING_SEEK_TO_LATEST and duration > 0:
+                        device.play_position = duration
+                        log_info("MediaInfo", f"Streaming seek to latest position: {duration:.1f}s")
 
                 # Supplement missing metadata from ffprobe (when DLNA lacks them)
                 if (not device.play_title or device.play_title == "None") and media_info.get("title"):
@@ -1315,7 +1312,13 @@ class DLNAService:
         app.router.add_get("/device/{device_id}/AVTransport.xml", self._handle_av_transport_xml)
         app.router.add_get("/device/{device_id}/RenderingControl.xml", self._handle_rendering_control_xml)
         app.router.add_get("/device/{device_id}/ConnectionManager.xml", self._handle_connection_manager_xml)
+
+        # "SetAVTransportURI","Play", "Stop", "Pause", "Seek"
+        # "GetPositionInfo","GetTransportInfo","GetCurrentTransportActions"
         app.router.add_post("/device/{device_id}/ctl/AVTransport", self._handle_av_transport_ctl)
+
+        # "SetVolume", "SetMute"
+        # "GetVolume","GetMute"
         app.router.add_post("/device/{device_id}/ctl/RenderingControl", self._handle_rendering_control_ctl)
         app.router.add_post("/device/{device_id}/ctl/ConnectionManager", self._handle_connection_manager_ctl)
         app.router.add_route("SUBSCRIBE", "/device/{device_id}/evt/{service}", self._handle_event_sub)

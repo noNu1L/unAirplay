@@ -50,6 +50,15 @@ OUTPUT_BITRATE = "320k"
 # Playback starts when downloaded cache file exceeds this size
 MIN_CACHE_SIZE = 100  # KB
 
+# Streaming audio playback behavior
+# When playing streaming sources (duration=0 or very large):
+# - True: Seek to latest position (for live streams)
+# - False: Play from beginning (for on-demand streams)
+# 流式音频播放行为：
+# - True: 跳到最新位置播放（适用于直播流）
+# - False: 从头播放（适用于点播流）
+STREAMING_SEEK_TO_LATEST = True
+
 # ================= Channel Separation (Reserved) =================
 # Enable stereo channel separation for multiple speakers
 # CHANNEL_SEPARATION_ENABLED = False

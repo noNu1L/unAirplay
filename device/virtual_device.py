@@ -92,6 +92,7 @@ class VirtualDevice:
     audio_bitrate: str = ""
     audio_sample_rate: int = 0
     audio_channels: int = 0
+    is_streaming: bool = False  # Whether the source is a streaming source (no caching needed)
 
     # DSP configuration
     dsp_enabled: bool = False
@@ -433,7 +434,7 @@ class VirtualDevice:
         """
         self.active_client_ip = client_ip
         self.active_client_sid = client_sid
-        log_debug("VirtualDevice", f"Active client set: {client_ip} (SID: {client_sid[:20]}...)")
+        log_debug("VirtualDevice", f"Active client set: {client_ip} (SID: {client_sid})")
 
     def get_active_client(self) -> tuple[Optional[str], Optional[str]]:
         """

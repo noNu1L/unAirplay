@@ -118,6 +118,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         self._closed = False
         self._eof = False
         self._first_data_received = False
+        self.play_url = None  # For local stream direct playback
 
     @property
     def sample_rate(self) -> int:
@@ -158,34 +159,46 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         if self._started:
             return
 
-        # Start download (from seek position if specified)
-        self._downloader.start(self._url, seek_position=self._seek_position)
+        # Check if source is streaming (determined by ffprobe in dlna_service)
+        is_streaming = getattr(self._device, 'is_streaming', False) if self._device else False
 
-        # Wait for cache buffer (blocking)
-        log_debug("AirPlaySource", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB)" +
-                 (f" (seek: {self._seek_position:.1f}s)" if self._seek_position > 0 else ""))
-        wait_start = time.time()
-        max_wait = 30  # seconds
+        if is_streaming:
+            # For streaming sources, decode directly without caching
+            log_debug("AirPlaySource", f"Streaming source detected, using direct URL: {self._url}")
+            self.play_url = self._url
+            cache_file = self.play_url
+        else:
+            # For regular files, use download cache
+            # Start download (from seek position if specified)
+            self._downloader.start(self._url, seek_position=self._seek_position)
 
-        while True:
-            file_size = self._downloader.get_file_size()
-            if file_size >= MIN_CACHE_BYTES:
-                log_debug("AirPlaySource", f"Cache buffer ready ({file_size // 1024}KB)")
-                break
+            # Wait for cache buffer (blocking)
+            log_debug("AirPlaySource", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB)" +
+                     (f" (seek: {self._seek_position:.1f}s)" if self._seek_position > 0 else ""))
+            wait_start = time.time()
+            max_wait = 30  # seconds
 
-            if self._downloader.error:
-                log_error("AirPlaySource", f"Download failed: {self._downloader.error}")
-                self._closed = True
-                self._eof = True
-                return
+            while True:
+                file_size = self._downloader.get_file_size()
+                if file_size >= MIN_CACHE_BYTES:
+                    log_debug("AirPlaySource", f"Cache buffer ready ({file_size // 1024}KB)")
+                    break
 
-            if time.time() - wait_start > max_wait:
-                log_error("AirPlaySource", "Cache buffer timeout")
-                self._closed = True
-                self._eof = True
-                return
+                if self._downloader.error:
+                    log_error("AirPlaySource", f"Download failed: {self._downloader.error}")
+                    self._closed = True
+                    self._eof = True
+                    return
 
-            time.sleep(0.1)
+                if time.time() - wait_start > max_wait:
+                    log_error("AirPlaySource", "Cache buffer timeout")
+                    self._closed = True
+                    self._eof = True
+                    return
+
+                time.sleep(0.1)
+
+            cache_file = self._downloader.file_path
 
         # Start decoder from cache file (no seek needed, cache already starts from seek position)
         self._decoder = FFmpegDecoder(
@@ -199,7 +212,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
             ),
             tag="AirPlaySource"
         )
-        self._decoder.start(self._downloader.file_path)
+        self._decoder.start(cache_file)
 
         if not self._decoder.is_running:
             log_error("AirPlaySource", "Failed to start decoder")

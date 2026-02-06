@@ -80,7 +80,7 @@ class EventBus:
             log_debug("EventBus", f"Subscribed to ALL events: {handler_name}")
         elif device_id:
             self._device_handlers[device_id][event_type].append(handler)
-            log_debug("EventBus", f"Subscribed to {event_type.name} for device {device_id[:8]}...")
+            log_debug("EventBus", f"Subscribed to {event_type.name} for device {device_id}...")
         else:
             self._handlers[event_type].append(handler)
             log_debug("EventBus", f"Subscribed to {event_type.name}: {handler_name}")
@@ -106,7 +106,7 @@ class EventBus:
         """Unsubscribe all handlers for a device"""
         if device_id in self._device_handlers:
             del self._device_handlers[device_id]
-            log_debug("EventBus", f"Unsubscribed all handlers for device {device_id[:8]}...")
+            log_debug("EventBus", f"Unsubscribed all handlers for device {device_id}...")
 
     def publish(self, event: Event):
         """

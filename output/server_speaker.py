@@ -164,32 +164,39 @@ class ServerSpeakerOutput:
         """Decoder thread: waits for cache, reads decoded PCM from cache file, applies DSP, pushes to audio queue"""
         device_name = self._device.device_name
         cache_file = self._downloader.file_path
+
+        # For streaming sources, use URL directly instead of cache file
+        if hasattr(self, 'play_url') and self.play_url:
+            cache_file = self.play_url
+            log_debug("ServerSpeaker", f"Using direct URL for streaming: {cache_file}")
+
         log_debug("ServerSpeaker", f"Decoder thread started: {device_name}")
 
-        # Wait for cache file to reach minimum size
-        log_info("ServerSpeaker", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB): {device_name}")
-        wait_start = time.time()
-        max_wait = 30  # Maximum wait time in seconds
+        # Wait for cache file to reach minimum size (skip for streaming sources)
+        if not (hasattr(self, 'play_url') and self.play_url):
+            log_info("ServerSpeaker", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB): {device_name}")
+            wait_start = time.time()
+            max_wait = 30  # Maximum wait time in seconds
 
-        while self._is_playing:
-            file_size = self._downloader.get_file_size()
-            if file_size >= MIN_CACHE_BYTES:
-                log_info("ServerSpeaker", f"Cache buffer ready ({file_size // 1024}KB): {device_name}")
-                break
+            while self._is_playing:
+                file_size = self._downloader.get_file_size()
+                if file_size >= MIN_CACHE_BYTES:
+                    log_info("ServerSpeaker", f"Cache buffer ready ({file_size // 1024}KB): {device_name}")
+                    break
 
-            # Check for download error
-            if self._downloader.error:
-                log_error("ServerSpeaker", f"Download failed, stopping decoder: {device_name}")
-                self._is_playing = False
-                return
+                # Check for download error
+                if self._downloader.error:
+                    log_error("ServerSpeaker", f"Download failed, stopping decoder: {device_name}")
+                    self._is_playing = False
+                    return
 
-            # Check timeout
-            if time.time() - wait_start > max_wait:
-                log_error("ServerSpeaker", f"Cache buffer timeout: {device_name}")
-                self._is_playing = False
-                return
+                # Check timeout
+                if time.time() - wait_start > max_wait:
+                    log_error("ServerSpeaker", f"Cache buffer timeout: {device_name}")
+                    self._is_playing = False
+                    return
 
-            time.sleep(0.1)
+                time.sleep(0.1)
 
         if not self._is_playing:
             return
@@ -289,15 +296,28 @@ class ServerSpeakerOutput:
         log_debug("ServerSpeaker", f"Starting playback: {self._device.device_name}" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
 
-        # Start download (from seek position if specified)
-        self._downloader.start(url, seek_position=seek_position)
+        # Check if source is streaming (determined by ffprobe in dlna_service)
+        is_streaming = getattr(self._device, 'is_streaming', False)
 
-        # Start decoder thread (will wait for cache buffer)
-        self._decoder_thread = threading.Thread(
-            target=self._decoder_loop,
-            daemon=True
-        )
-        self._decoder_thread.start()
+        if is_streaming:
+            # For streaming sources, decode directly without caching
+            log_debug("ServerSpeaker", f"Streaming source detected, using direct URL")
+            self.play_url = url
+            self._decoder_thread = threading.Thread(
+                target=self._decoder_loop,
+                daemon=True
+            )
+            self._decoder_thread.start()
+        else:
+            # For regular files, use download cache
+            self._downloader.start(url, seek_position=seek_position)
+             # Start decoder thread (will wait for cache buffer)
+            self._decoder_thread = threading.Thread(
+                target=self._decoder_loop,
+                daemon=True
+            )
+            self._decoder_thread.start()
+
 
     def _stop_playback_internal(self):
         """Stop both download and decoder processes"""

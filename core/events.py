@@ -62,7 +62,7 @@ class Event:
     timestamp: float = field(default_factory=time.time)
 
     def __repr__(self):
-        return f"Event({self.type.name}, device={self.device_id[:8] if self.device_id else 'all'}...)"
+        return f"Event({self.type.name}, device={self.device_id if self.device_id else 'all'}...)"
 
 
 # ===== Command Event Factories =====
