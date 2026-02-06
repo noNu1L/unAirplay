@@ -108,6 +108,11 @@ class VirtualDevice:
     # DLNA service info
     dlna_uuid: str = field(default_factory=lambda: f"uuid:dlna-bridge-{uuid.uuid4().hex[:8]}")
 
+    # Active DLNA clients (IP and SID tracking)
+    # Records clients that have performed control actions (Play, Stop, Pause, Seek, SetAVTransportURI)
+    active_client_ip: Optional[str] = None
+    active_client_sid: Optional[str] = None
+
     # Internal components (not serialized)
     _output: Optional["BaseOutput"] = field(default=None, repr=False)
     _enhancer: Optional["BaseEnhancer"] = field(default=None, repr=False)
@@ -417,6 +422,27 @@ class VirtualDevice:
             self.audio_sample_rate = sample_rate
         if channels is not None:
             self.audio_channels = channels
+
+    def set_active_client(self, client_ip: str, client_sid: str):
+        """
+        Set the active DLNA client.
+
+        Args:
+            client_ip: Client IP address
+            client_sid: Client subscription ID (SID), can be None if not found
+        """
+        self.active_client_ip = client_ip
+        self.active_client_sid = client_sid
+        log_debug("VirtualDevice", f"Active client set: {client_ip} (SID: {client_sid[:20]}...)")
+
+    def get_active_client(self) -> tuple[Optional[str], Optional[str]]:
+        """
+        Get the active DLNA client.
+
+        Returns:
+            Tuple of (client_ip, client_sid)
+        """
+        return self.active_client_ip, self.active_client_sid
 
     def get_current_position(self) -> float:
         """Get current playback position in seconds"""

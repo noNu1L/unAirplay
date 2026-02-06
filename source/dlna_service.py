@@ -72,6 +72,22 @@ if TYPE_CHECKING:
     from device.virtual_device import VirtualDevice
 
 
+def extract_client_ip(callback_url: str) -> Optional[str]:
+    """
+    Extract client IP address from callback URL.
+
+    "http://192.168.100.41:8058/callback" -> "192.168.100.41"
+    """
+    try:
+        # Match IP address pattern in URL
+        match = re.search(r'://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)', callback_url)
+        if match:
+            return match.group(1)
+        return None
+    except Exception:
+        return None
+
+
 # ============== XML Templates ==============
 
 def get_device_xml(device: "VirtualDevice") -> str:
@@ -282,6 +298,64 @@ def soap_response(action: str, service: str, params: str = "") -> str:
 </s:Envelope>"""
 
 
+def soap_error_response(error_code: int, error_description: str = "") -> str:
+    """
+    Generate UPnP SOAP error response
+
+    Args:
+        error_code: UPnP error code (e.g., 701, 702, 402)
+        error_description: Human-readable error description (optional)
+
+    Returns:
+        SOAP error response XML string
+    """
+    # UPnP standard error descriptions
+    error_descriptions = {
+        401: "Invalid Action",
+        402: "Invalid Args",
+        501: "Action Failed",
+        701: "Transition Not Available",
+        702: "No Contents",
+        703: "Read Error",
+        704: "Format Not Supported",
+        705: "Transport Is Locked",
+        706: "Write Error",
+        707: "Media Is Protected",
+        708: "Format Unreadable",
+        709: "Cannot Use Network",
+        710: "End of Media",
+        711: "No Media",
+        712: "No Seek Support",
+        713: "Seek Mode Not Supported",
+        714: "Invalid Seek Target",
+        715: "Play Mode Not Supported",
+        716: "Record Quality Not Supported",
+        717: "Record Quality Not Available",
+        718: "Resource Unavailable"
+    }
+
+    # Use provided description or default
+    desc = error_description or error_descriptions.get(error_code, "Unknown Error")
+
+    # Generate SOAP fault response
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" 
+           s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <s:Fault>
+      <faultcode>s:Client</faultcode>
+      <faultstring>UPnPError</faultstring>
+      <detail>
+        <UPnPError xmlns="urn:schemas-upnp-org:control-1-0" 
+                  errorCode="{error_code}">
+          <errorDescription>{desc}</errorDescription>
+        </UPnPError>
+      </detail>
+    </s:Fault>
+  </s:Body>
+</s:Envelope>"""
+
+
 # ============== DLNA Service ==============
 
 class DLNAService:
@@ -347,6 +421,25 @@ class DLNAService:
         if device_id not in self._subscribers:
             self._subscribers[device_id] = {}
         return self._subscribers[device_id]
+
+    def _find_sid_by_ip(self, device_id: str, client_ip: str) -> Optional[str]:
+        """
+        Find subscription ID (SID) by client IP address.
+
+        Args:
+            device_id: Device ID
+            client_ip: Client IP address
+
+        Returns:
+            SID if found, None otherwise
+        """
+        subscribers = self._get_device_subscribers(device_id)
+        for sid, sub_info in subscribers.items():
+            if sub_info.get("client_ip") == client_ip:
+                return sid
+        return None
+
+
 
     # ================= SSDP =================
 
@@ -505,7 +598,57 @@ class DLNAService:
         action = self._parse_soap_action(body)
         req_ip = request.remote or "unknown"
 
-        log_debug("AVTransport", f"Action: {action} from {req_ip} for {device.device_name}")
+        if not req_ip:
+            return web.Response(status=401, text="", headers={"Connection": "close"})
+
+        # Find subscription ID for this client
+        # 查找是否有订阅
+        sid = self._find_sid_by_ip(device.device_id, req_ip)
+
+        # Block all actions from non-subscribed clients
+        # 未订阅不执行操作(需要先进行 SetAVTransportURI)
+        if not sid and action in ["Play", "Stop", "Pause", "Seek"]:
+            log_debug("AVTransport", f"Request rejected: {action} from non-subscribed client {req_ip}")
+            return web.Response(
+                status=500,
+                text=soap_error_response(701, "Client must subscribe to control device"),
+                content_type="text/xml",
+                charset="utf-8"
+            )
+
+        # 对直接发送 "SetAVTransportURI" dlna客户端设备 操作赋予一种临时订阅(部分app非标准DLNA行为，不会进行订阅)
+        if not sid and action in ["SetAVTransportURI"]:
+            # self._temp_subscribe(self, req_ip, device.device_id)
+            subscribers = self._get_device_subscribers(device.device_id)
+            sid = f"uuid:{uuid.uuid4()}"
+            subscribers[sid] = {
+                "callback": f'http://{req_ip}/temp/',
+                "timeout": 3600,
+                "expires": time.time() + 3600,  # Absolute timestamp
+                "seq": 0,
+                "service": "AVTransport",  # Should be AVTransport, not SetAVTransportURI
+                "client_ip": req_ip,
+                "last_play_url": None,
+                "subscribe": "temp"
+            }
+            log_debug("Subscribe", f"Temporary subscription created for {req_ip}: {sid[:20]}...")
+
+        # Set active client for control actions
+        # 对此类操作标为为活跃设备
+        if sid and action in ["SetAVTransportURI", "Play", "Seek"]:
+            device.set_active_client(req_ip, sid)
+
+        # 非活跃设备不允许操作
+        # Inactive devices cannot be operated
+        if action in ["Stop", "Pause"]:
+            active_ip, active_sid = device.get_active_client()
+            if active_ip != req_ip:
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(701, "Inactive devices cannot be operated"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
 
         if action == "SetAVTransportURI":
             log_debug("SetAVTransportURI", f"body:\n{body}\n--- end ---")
@@ -516,6 +659,10 @@ class DLNAService:
                 device.play_state = "TRANSITIONING"
                 device.play_position = 0.0
                 device.play_start_time = 0.0
+
+                # Record last play URL to subscriber info
+                subscribers = self._get_device_subscribers(device.device_id)
+                subscribers[sid]["last_play_url"] = uri
 
                 # Parse metadata
                 metadata_match = re.search(r"<CurrentURIMetaData>([^<]*)</CurrentURIMetaData>", body)
@@ -531,13 +678,42 @@ class DLNAService:
 
         elif action == "Play":
             log_debug("Playback", f"Play: {device.device_name}")
+            subscribers = self._get_device_subscribers(device.device_id)
 
-            event_bus.publish(cmd_play(device.device_id, device.play_url, device.play_position))
-            # TODO 大文件解码Seek行为等待时间比较长,需要缓存层解决 。已加入缓存层，但未对Seek行为读取缓存
+            # 优先级策略：
+            # Priority strategy:
+            # 1. 订阅者自己的 last_play_url（用于多客户端恢复）
+            #    Subscriber's own last_play_url (for multi-client recovery)
+            # 2. 设备当前的 play_url（用于首次播放/单客户端场景）
+            #    Device's current play_url (for first play/single-client scenario)
+            play_url = subscribers[sid].get("last_play_url")
+
+            if not play_url:
+                # Fallback to device URL
+                play_url = device.play_url
+                log_debug("Playback", f"Using device URL for client {req_ip}")
+
+            # 严格检查：如果仍然没有URL，拒绝播放
+            # Strict check: reject play if still no URL available
+            if not play_url:
+                log_warning("Playback",
+                           f"Play rejected - no URI available: {device.device_name}")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(701, "No media available for playback"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+
+            # 记录到订阅者（用于下次恢复）
+            # Record to subscriber (for next recovery)
+            subscribers[sid]["last_play_url"] = play_url
+
+            event_bus.publish(cmd_play(device.device_id, play_url, device.play_position))
             response = soap_response("Play", "AVTransport")
 
         elif action == "Stop":
-            log_debug("Playback", f"Stop: {device.device_name}")
+            log_debug("Playback", f"Stop: {device.device_name},req_ip: {req_ip}")
 
             # Publish stop command event
             event_bus.publish(cmd_stop(device.device_id))
@@ -552,24 +728,61 @@ class DLNAService:
 
         elif action == "Seek":
             # TODO 大文件解码Seek行为等待时间比较长,需要缓存层解决
-            match = re.search(r"<Target>([^<]*)</Target>", body)
-            if match:
-                target = match.group(1)
-                position = device.parse_time(target)
 
-                # Filter: skip seek if position is same as current (Migu Music bug workaround)
-                if abs(position - device.get_current_position()) < 1.0:
-                    log_debug("Playback", f"Seek ignored (same position {position:.1f}s): {device.device_name}")
-                else:
-                    log_debug("Playback", f"Seek to {target}: {device.device_name}")
-                    # Publish seek command event
-                    event_bus.publish(cmd_seek(device.device_id, position))
+            # 检查是否有媒体可以 Seek
+            # Check if media is available for Seek
+            if not device.play_url and device.play_duration == 0:
+                log_warning("Playback", f"Seek rejected - no media: {device.device_name}")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(701, "No media available for seek"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+
+            match = re.search(r"<Target>([^<]*)</Target>", body)
+            if not match:
+                log_warning("Playback", f"Seek rejected - invalid target format: {device.device_name}")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, "Invalid Seek Target format"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+
+            target = match.group(1)
+            try:
+                position = device.parse_time(target)
+            except Exception as e:
+                log_warning("Playback", f"Seek rejected - invalid position: {target}")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, f"Invalid Seek Target: {target}"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+
+            # 检查位置是否超出范围
+            # Check if position is out of range
+            if position < 0 or (device.play_duration > 0 and position > device.play_duration):
+                log_warning("Playback", f"Seek rejected - position out of range: {position}")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(714, f"Seek target {position} out of range"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+
+            # Filter: skip seek if position is same as current (Migu Music bug workaround)
+            if abs(position - device.get_current_position()) < 1.0:
+                log_debug("Playback", f"Seek ignored (same position {position:.1f}s): {device.device_name}")
+            else:
+                log_debug("Playback", f"Seek to {target}: {device.device_name}")
+                # Publish seek command event
+                event_bus.publish(cmd_seek(device.device_id, position))
+
             response = soap_response("Seek", "AVTransport")
 
-        # Some clients may frequently request this interface to obtain the playback progress,
-        # such as the internal DLNA of the Android version of NetEase Cloud Music.
-
-        # 有的客户端会频繁请求该接口, 以获取播放进度, 如安卓版本网易云音乐内部DLNA
         elif action == "GetPositionInfo":
             position_str = device.format_position()
             duration_str = device.format_duration()
@@ -622,6 +835,10 @@ class DLNAService:
         else:
             response = soap_response(action or "Unknown", "AVTransport")
 
+        # log_debug("GetCurrentTransportActions-1", f"Action: {action}")
+        # log_debug("GetCurrentTransportActions-2", f"response: {response}")
+        # log_debug("GetCurrentTransportActions-3", f"req_ip: {req_ip}")
+
         return web.Response(text=response, content_type="text/xml", charset="utf-8")
 
     async def _handle_rendering_control_ctl(self, request: web.Request):
@@ -632,6 +849,27 @@ class DLNAService:
 
         body = await request.text()
         action = self._parse_soap_action(body)
+        req_ip = request.remote or "unknown"
+
+        # Block volume/mute control from non-active clients
+        if action in ["SetVolume", "SetMute"]:
+            active_ip, active_sid = device.get_active_client()
+            if not active_sid:
+                log_warning("RenderingControl", f"Control rejected: {action} from {req_ip} (no active client)")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, "No active client for this device"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+            if req_ip != active_ip:
+                log_warning("RenderingControl", f"Control rejected: {action} from non-active client {req_ip} (active: {active_ip})")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, "Only active client can control volume"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
 
         if action == "GetVolume":
             # Read from output (supports real-time volume reading)
@@ -650,12 +888,32 @@ class DLNAService:
 
         elif action == "SetVolume":
             match = re.search(r"<DesiredVolume>(\d+)</DesiredVolume>", body)
-            if match:
-                volume = int(match.group(1))
-                log_info("Volume", f"Volume set to {volume}: {device.device_name}")
+            if not match:
+                log_warning("RenderingControl", f"SetVolume rejected - invalid format")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, "Invalid DesiredVolume format"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
 
-                # Publish set volume command event
-                event_bus.publish(cmd_set_volume(device.device_id, volume))
+            volume = int(match.group(1))
+
+            # 验证音量范围
+            # Validate volume range
+            if volume < 0 or volume > 100:
+                log_warning("RenderingControl", f"SetVolume rejected - out of range: {volume}")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, f"Volume must be 0-100, got {volume}"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+
+            log_info("Volume", f"Volume set to {volume}: {device.device_name}")
+
+            # Publish set volume command event
+            event_bus.publish(cmd_set_volume(device.device_id, volume))
             response = soap_response("SetVolume", "RenderingControl")
 
         elif action == "GetMute":
@@ -674,12 +932,31 @@ class DLNAService:
 
         elif action == "SetMute":
             match = re.search(r"<DesiredMute>(\d+)</DesiredMute>", body)
-            if match:
-                muted = match.group(1) == "1"
-                log_info("Mute", f"{'Muted' if muted else 'Unmuted'}: {device.device_name}")
+            if not match:
+                log_warning("RenderingControl", f"SetMute rejected - invalid format")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, "Invalid DesiredMute format"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
 
-                # Publish set mute command event
-                event_bus.publish(cmd_set_mute(device.device_id, muted))
+            mute_val = match.group(1)
+
+            if mute_val not in ["0", "1"]:
+                log_warning("RenderingControl", f"SetMute rejected - invalid value: {mute_val}")
+                return web.Response(
+                    status=500,
+                    text=soap_error_response(402, f"Mute must be 0 or 1, got {mute_val}"),
+                    content_type="text/xml",
+                    charset="utf-8"
+                )
+
+            muted = mute_val == "1"
+            log_info("Mute", f"{'Muted' if muted else 'Unmuted'}: {device.device_name}")
+
+            # Publish set mute command event
+            event_bus.publish(cmd_set_mute(device.device_id, muted))
             response = soap_response("SetMute", "RenderingControl")
 
         else:
@@ -807,28 +1084,85 @@ class DLNAService:
   </e:property>
 </e:propertyset>'''
 
+    def _build_event_xml_with_state(self, device: "VirtualDevice", override_state: str) -> str:
+        """
+        Build event notification XML with custom state override.
+
+        Args:
+            device: Virtual device
+            override_state: State to override (e.g., "PAUSED_PLAYBACK")
+
+        Returns:
+            Event XML string
+        """
+        # Determine actions based on override state
+        if override_state == "PLAYING":
+            actions = "Pause,Stop,Seek"
+        elif override_state == "PAUSED_PLAYBACK":
+            actions = "Play,Stop"
+        elif override_state == "TRANSITIONING":
+            actions = "Stop"
+        else:  # STOPPED
+            actions = "Play"
+
+        uri_escaped = xml_escape(device.play_url) if device.play_url else ""
+
+        inner_xml = f'''<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/">
+  <InstanceID val="0">
+    <TransportState val="{override_state}"/>
+    <TransportStatus val="OK"/>
+    <CurrentTransportActions val="{actions}"/>
+    <AVTransportURI val="{uri_escaped}"/>
+    <CurrentTrackURI val="{uri_escaped}"/>
+  </InstanceID>
+</Event>'''
+        last_change = xml_escape(inner_xml)
+
+        return f'''<?xml version="1.0" encoding="UTF-8"?>
+<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">
+  <e:property>
+    <LastChange>{last_change}</LastChange>
+  </e:property>
+</e:propertyset>'''
+
     async def _notify_subscribers(self, device: "VirtualDevice"):
-        """Send event notifications to all subscribers for a device"""
+        """
+        Send event notifications to all subscribers.
+
+        - Active client receives the actual device state
+        - Inactive clients receive PAUSED_PLAYBACK state
+        """
         subscribers = self._get_device_subscribers(device.device_id)
         if not subscribers:
             return
 
-        event_xml = self._build_event_xml(device)
+        active_ip, active_sid = device.get_active_client()
         now = time.time()
         expired_sids = []
 
+        # Build event XMLs
+        active_event_xml = self._build_event_xml(device)  # Real state for active client
+        inactive_event_xml = self._build_event_xml_with_state(device, "PAUSED_PLAYBACK")  # PAUSED for inactive clients 对非活跃设备改为暂停状态
+
         for sid, sub_info in subscribers.items():
-            # TODO  订阅设备过期问题待修复
+            # Check if subscription is expired
             if sub_info["expires"] < now:
                 expired_sids.append(sid)
                 continue
 
+            # Only notify AVTransport subscribers
             if sub_info.get("service") != "AVTransport":
                 continue
 
+            client_ip = sub_info.get("client_ip", "")
             callback_url = sub_info["callback"]
             seq = sub_info["seq"]
             sub_info["seq"] += 1
+
+            # Determine which event XML to send
+            is_active_client = (sid == active_sid)
+            event_xml = active_event_xml if is_active_client else inactive_event_xml
+            client_type = "active" if is_active_client else "inactive"
 
             try:
                 async with aiohttp.ClientSession() as session:
@@ -847,13 +1181,14 @@ class DLNAService:
                             timeout=aiohttp.ClientTimeout(total=5)
                     ) as resp:
                         if resp.status < 300:
-                            log_debug("Event", f"Notification sent: {device.play_state} -> {device.device_name}")
+                            state_sent = device.play_state if is_active_client else "PAUSED_PLAYBACK"
+                            log_debug("Event", f"Notification sent ({client_type}): {state_sent} -> {device.device_name} -> {client_ip}")
                         else:
                             log_debug("Event", f"Notification failed ({resp.status})")
             except Exception as e:
                 log_debug("Event", f"Notification exception: {e}")
 
-        # Clean up expired subscriptions
+    # Clean up expired subscriptions
         for sid in expired_sids:
             del subscribers[sid]
             log_debug("Subscribe", f"Subscription expired: {sid[:20]}...")
@@ -898,15 +1233,34 @@ class DLNAService:
                 timeout_match = re.search(r"Second-(\d+)", timeout_header)
                 timeout = int(timeout_match.group(1)) if timeout_match else 1800
 
+                # Extract client IP from callback URL
+                client_ip = extract_client_ip(callback_url)
+
+                # Clean up old subscriptions from the same client IP
+                if client_ip:
+                    old_sids = []
+                    for old_sid, sub_info in subscribers.items():
+                        old_callback = sub_info.get("callback", "")
+                        old_ip = extract_client_ip(old_callback)
+                        if old_ip == client_ip and sub_info.get("service") == service:
+                            old_sids.append(old_sid)
+
+                    for old_sid in old_sids:
+                        del subscribers[old_sid]
+                        log_debug("Subscribe", f"Removed old subscription from {client_ip}: {old_sid[:20]}...")
+
+                # Generate new random SID (符合 UPnP 规范)
                 sid = f"uuid:{uuid.uuid4()}"
                 subscribers[sid] = {
                     "callback": callback_url,
                     "timeout": timeout,
                     "expires": time.time() + timeout,
                     "seq": 0,
-                    "service": service
+                    "service": service,
+                    "client_ip": client_ip,
+                    "last_play_url": None
                 }
-                log_debug("Subscribe", f"New subscription: {device.device_name} ({service})")
+                log_debug("Subscribe", f"New subscription: {device.device_name} ({service}) from {client_ip or 'unknown'}")
 
                 if service == "AVTransport":
                     asyncio.create_task(self._send_initial_event(device, sid, callback_url))
