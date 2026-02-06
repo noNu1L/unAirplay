@@ -12,7 +12,7 @@ v1.1.2 (2026-02-06)
    - Devices offline for consecutive scans will be automatically removed
    - Configurations automatically restored when device comes back online
 
-   添加 AIRPLAY_OFFLINE_THRESHOLD 配置（默认：3 次扫描）
+   添加 AIRPLAY_OFFLINE_THRESHOLD 配置（默认：10 次扫描）
    设备连续多次扫描未检测到将自动删除虚拟设备
    设备重新上线时自动恢复配置
 
