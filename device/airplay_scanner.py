@@ -8,7 +8,9 @@ import pyatv
 from pyatv.const import Protocol
 
 from core.utils import log_info, log_debug, log_warning
-from config import AIRPLAY_SCAN_TIMEOUT, AIRPLAY_SCAN_INTERVAL, AIRPLAY_EXCLUDE
+from core.event_bus import event_bus
+from core.events import device_offline_threshold_reached
+from config import AIRPLAY_SCAN_TIMEOUT, AIRPLAY_SCAN_INTERVAL, AIRPLAY_EXCLUDE, AIRPLAY_OFFLINE_THRESHOLD
 
 
 class AirPlayScanner:
@@ -35,6 +37,7 @@ class AirPlayScanner:
         self._on_device_lost = on_device_lost
 
         self._devices: Dict[str, Dict[str, Any]] = {}  # identifier -> device info
+        self._offline_counters: Dict[str, int] = {}  # identifier -> offline count
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -113,6 +116,7 @@ class AirPlayScanner:
                     if identifier not in self._devices:
                         # New device found
                         self._devices[identifier] = device_info
+                        self._offline_counters[identifier] = 0  # Reset counter
                         log_info(
                             "AirPlayScanner",
                             f"New device discovered: {device_info['name']} ({device_info['address']})"
@@ -125,12 +129,22 @@ class AirPlayScanner:
                     else:
                         # Update existing device info (address may change)
                         self._devices[identifier] = device_info
+                        # Device still online, reset offline counter
+                        self._offline_counters[identifier] = 0
 
                 # Check for lost devices
                 lost_ids = current_ids - discovered_ids
                 for identifier in lost_ids:
-                    device_info = self._devices.pop(identifier, None)
-                    if device_info:
+                    device_info = self._devices.get(identifier)
+                    if not device_info:
+                        continue
+
+                    # Increment offline counter
+                    self._offline_counters[identifier] = self._offline_counters.get(identifier, 0) + 1
+                    offline_count = self._offline_counters[identifier]
+
+                    if offline_count == 1:
+                        # First time offline: trigger existing callback (backward compatibility)
                         log_info(
                             "AirPlayScanner",
                             f"Device lost: {device_info['name']} ({device_info['address']})"
@@ -140,6 +154,21 @@ class AirPlayScanner:
                                 self._on_device_lost(identifier)
                             except Exception as e:
                                 log_warning("AirPlayScanner", f"on_device_lost callback error: {e}")
+
+                    elif offline_count >= AIRPLAY_OFFLINE_THRESHOLD:
+                        # Threshold reached: publish event and remove from scanner
+                        log_info(
+                            "AirPlayScanner",
+                            f"Device {device_info['name']} offline for {offline_count} scans, "
+                            f"threshold reached ({AIRPLAY_OFFLINE_THRESHOLD})"
+                        )
+
+                        # Publish event to trigger device removal
+                        event_bus.publish(device_offline_threshold_reached(identifier))
+
+                        # Remove from scanner's tracking
+                        self._devices.pop(identifier, None)
+                        self._offline_counters.pop(identifier, None)
 
                 # Wait for next scan interval
                 await asyncio.sleep(AIRPLAY_SCAN_INTERVAL)

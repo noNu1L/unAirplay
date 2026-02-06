@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any, Callable
 
 from core.utils import log_info, log_debug, log_warning
 from core.event_bus import event_bus
-from core.events import EventType, device_added, device_removed, device_connected, device_disconnected
+from core.events import EventType, device_added, device_removed, device_connected, device_disconnected, cmd_stop
 from core.config_store import config_store
 from config import ENABLE_SERVER_SPEAKER
 from output.audio_device_detector import has_audio_output_device, log_audio_devices
@@ -44,6 +44,12 @@ class DeviceManager:
 
         # Callbacks for output creation (set by run.py)
         self._output_factory: Optional[Callable[[VirtualDevice], None]] = None
+
+        # Subscribe to device offline threshold reached event
+        event_bus.subscribe(
+            EventType.DEVICE_OFFLINE_THRESHOLD_REACHED,
+            self._on_device_offline_threshold_reached
+        )
 
     def set_output_factory(self, factory: Callable[[VirtualDevice], None]):
         """
@@ -122,6 +128,47 @@ class DeviceManager:
 
             # Publish disconnected event
             event_bus.publish(device_disconnected(device_id))
+
+    def _on_device_offline_threshold_reached(self, event):
+        """
+        Handle device offline threshold reached event: remove virtual device.
+
+        Args:
+            event: Event containing airplay_id
+        """
+        airplay_id = event.data.get("airplay_id")
+        if not airplay_id:
+            return
+
+        device_id = self._airplay_map.get(airplay_id)
+        if not device_id:
+            log_debug("DeviceManager", f"Device {airplay_id} not found in map, already removed")
+            return
+
+        device = self._devices.get(device_id)
+        if not device:
+            log_debug("DeviceManager", f"Device {device_id} not found, already removed")
+            return
+
+        log_info("DeviceManager",
+                f"Removing device {device.device_name} (ID: {device_id}) due to prolonged offline")
+
+        # Stop device if playing
+        if device.play_state != "STOPPED":
+            event_bus.publish(cmd_stop(device_id))
+
+        # Shutdown device (unsubscribe from events)
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(device.shutdown(), self._loop)
+
+        # Remove from mappings
+        del self._airplay_map[airplay_id]
+        del self._devices[device_id]
+
+        # Publish device removed event
+        event_bus.publish(device_removed(device_id))
+
+        log_info("DeviceManager", f"Device {device.device_name} removed successfully")
 
     def _create_server_speaker(self):
         """Create Server Speaker virtual device for local audio output."""

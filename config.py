@@ -2,11 +2,10 @@
 unAirplay - Global Configuration
 """
 import socket
-import uuid
 
 # ================= Application Info =================
 APP_NAME = "unAirplay"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 
 # ================= Network Configuration =================
 HTTP_PORT = 6088
@@ -43,9 +42,6 @@ CHANNELS = 2                 # Number of channels
 CHUNK_DURATION_MS = 100      # Audio chunk duration in milliseconds
 BUFFER_SIZE = 10             # Audio buffer queue size
 
-# Output bitrate for DSP mode (when re-encoding is needed)
-OUTPUT_BITRATE = "320k"
-
 # Minimum cache buffer size before starting playback (KB)
 # Playback starts when downloaded cache file exceeds this size
 MIN_CACHE_SIZE = 100  # KB
@@ -78,6 +74,12 @@ AIRPLAY_SCAN_TIMEOUT = 5
 # Exclude devices by IP address or name
 # 按IP或名字地址排除设备，例如: ["192.168.1.100", "小喇叭"]
 AIRPLAY_EXCLUDE = []
+
+# Device offline detection configuration
+# 设备离线检测配置
+# Device will be removed after this many consecutive failed scans
+# 设备连续多少次扫描未检测到后，删除虚拟设备
+AIRPLAY_OFFLINE_THRESHOLD = 3
 
 # ================= Server Speaker Configuration =================
 # Whether to enable the Server Speaker virtual device (output to the local speaker of the server)

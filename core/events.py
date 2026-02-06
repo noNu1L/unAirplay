@@ -31,6 +31,7 @@ class EventType(Enum):
     DEVICE_REMOVED = auto()     # Device removed
     DEVICE_CONNECTED = auto()   # Device connected
     DEVICE_DISCONNECTED = auto()  # Device disconnected
+    DEVICE_OFFLINE_THRESHOLD_REACHED = auto()  # Device offline threshold reached
 
     # ===== State Events =====
     # Published by VirtualDevice
@@ -204,6 +205,15 @@ def device_connected(device_id: str) -> Event:
 def device_disconnected(device_id: str) -> Event:
     """Create device disconnected event"""
     return Event(type=EventType.DEVICE_DISCONNECTED, device_id=device_id)
+
+
+def device_offline_threshold_reached(airplay_id: str) -> Event:
+    """Create device offline threshold reached event (triggers virtual device removal)"""
+    return Event(
+        type=EventType.DEVICE_OFFLINE_THRESHOLD_REACHED,
+        device_id=None,  # Using airplay_id in data, not device_id
+        data={"airplay_id": airplay_id}
+    )
 
 
 # ===== System Event Factories =====
