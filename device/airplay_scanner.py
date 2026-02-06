@@ -127,10 +127,25 @@ class AirPlayScanner:
                             except Exception as e:
                                 log_warning("AirPlayScanner", f"on_device_found callback error: {e}")
                     else:
+                        # Device already known
+                        was_offline = self._offline_counters.get(identifier, 0) > 0
+
                         # Update existing device info (address may change)
                         self._devices[identifier] = device_info
                         # Device still online, reset offline counter
                         self._offline_counters[identifier] = 0
+
+                        # If device was offline and now back online, trigger found callback
+                        if was_offline:
+                            log_info(
+                                "AirPlayScanner",
+                                f"Device reconnected: {device_info['name']} ({device_info['address']})"
+                            )
+                            if self._on_device_found:
+                                try:
+                                    self._on_device_found(device_info)
+                                except Exception as e:
+                                    log_warning("AirPlayScanner", f"on_device_found callback error: {e}")
 
                 # Check for lost devices
                 lost_ids = current_ids - discovered_ids

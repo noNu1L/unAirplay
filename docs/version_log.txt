@@ -16,6 +16,17 @@ v1.1.2 (2026-02-06)
    设备连续多次扫描未检测到将自动删除虚拟设备
    设备重新上线时自动恢复配置
 
+2. Bug Fix: Fixed device reconnection status update
+   修复问题：修复设备重新上线时连接状态更新问题
+
+   - Device connection status now correctly updated when device reconnects after brief offline
+   - AirPlayScanner detects reconnection and triggers status update
+   - Ensures device.connected flag is set to True when device comes back online
+
+   设备短暂离线后重新上线时，连接状态现在能正确更新
+   AirPlayScanner 检测到重连并触发状态更新
+   确保设备重新上线时 device.connected 标志被设置为 True
+
 v1.1.1 (2026-02-06)
 -------------------
 
