@@ -61,4 +61,4 @@ The project supports automatic discovery and configuration, usually ready to use
 
 - **About Audio Quality**: Some Android music apps may have lower original stream quality when pushing from non-playback screens (i.e., non-direct URL push mode). In this case, enabling spectral enhancement in DSP can improve the listening experience to some extent.
 - **Current Song Finishes but Next Song Doesn't Play**: If this happens when using in-app DLNA casting on Android, try disabling "Ignore Battery Optimization" or removing the app from the "High Power Consumption Whitelist" in your phone's battery settings.
-- **About DSP Modes**: Performance: FIR <= FFT < IIR. Quality: FIR >= FFT > IIR. IIR mode is recommended for low-performance devices due to its minimal resource usage.
+- **About DSP Modes**: CPU usage: FIR > IIR >= FFT. Audio quality: FIR >= FFT > IIR. IIR mode has lower latency (zero delay), while FFT mode provides better CPU efficiency. Choose based on your priorities: latency vs. resource consumption.
