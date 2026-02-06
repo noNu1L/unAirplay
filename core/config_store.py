@@ -81,21 +81,6 @@ class ConfigStore:
         try:
             with open(self._config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-
-            # Handle old format (single device config)
-            if "devices" not in data and "dsp" in data:
-                # Migrate old format to new format
-                log_info("ConfigStore", "Migrating old config format to new format")
-                self._config = {
-                    "devices": {
-                        "server_speaker": {
-                            "dsp_enabled": data.get("dsp_enabled", False),
-                            "dsp_config": data.get("dsp", copy.deepcopy(DEFAULT_DSP_CONFIG))
-                        }
-                    }
-                }
-                self._save()
-            else:
                 self._config = data
 
             log_info("ConfigStore", f"Loaded config with {len(self._config.get('devices', {}))} device(s)")
@@ -113,7 +98,7 @@ class ConfigStore:
         except Exception as e:
             log_warning("ConfigStore", f"Failed to save config: {e}")
 
-    def get_device_config(self, device_id: str) -> Dict[str, Any]:
+    def get_device_config(self, device_id: str) -> Any | None:
         """
         Get device configuration.
 
