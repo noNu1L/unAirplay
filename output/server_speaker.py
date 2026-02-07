@@ -175,7 +175,7 @@ class ServerSpeakerOutput:
 
         # Wait for cache file to reach minimum size (skip for streaming sources)
         if not (hasattr(self, 'play_url') and self.play_url):
-            log_info("ServerSpeaker", f"{device_name}: Waiting for cache buffer ({MIN_CACHE_SIZE}KB)")
+            log_debug("ServerSpeaker", f"{device_name}: Waiting for cache buffer ({MIN_CACHE_SIZE}KB)")
             wait_start = time.time()
             max_wait = 30  # Maximum wait time in seconds
 

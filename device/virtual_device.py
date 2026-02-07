@@ -136,6 +136,9 @@ class VirtualDevice:
     def create_airplay_device(cls, airplay_info: Dict[str, Any]) -> "VirtualDevice":
         """Create a virtual device from AirPlay device info."""
         name = airplay_info.get("name", "Unknown")
+        if isinstance(name, str):
+            name = name.strip()
+            
         airplay_id = airplay_info.get("identifier")
         return cls(
             device_id=generate_device_id(airplay_id, "airplay"),
