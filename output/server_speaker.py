@@ -290,6 +290,11 @@ class ServerSpeakerOutput:
         """Start playback: download thread + decoder thread"""
         self._stop_playback_internal()
 
+        # Reset DSP internal buffers to prevent old audio leaking into new song
+        # - FFT 和 FIR 会保留旧的采样音频，播放新的歌曲会有残留音频
+        if self._enhancer and hasattr(self._enhancer, 'reset_all'):
+            self._enhancer.reset_all()
+
         self._current_url = url
         self._current_position = seek_position
         self._playback_start_time = time.time()
