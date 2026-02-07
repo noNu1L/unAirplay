@@ -40,7 +40,7 @@ class FFmpegDownloader:
     支持边下载边读取的场景。
     """
 
-    def __init__(self, config: DownloaderConfig, tag: str = "FFmpegDownloader"):
+    def __init__(self, config: DownloaderConfig, tag: str = "FFmpegDownloader", device_name: str = ""):
         """
         Initialize downloader
         初始化下载器
@@ -48,9 +48,11 @@ class FFmpegDownloader:
         Args:
             config: Downloader configuration / 下载器配置
             tag: Log tag / 日志标签
+            device_name: Device name for logging / 设备名称用于日志
         """
         self._config = config
         self._tag = tag
+        self._device_name = device_name
         self._process: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
         self._completed = False
@@ -157,9 +159,9 @@ class FFmpegDownloader:
         try:
             if os.path.exists(self.file_path):
                 os.remove(self.file_path)
-                log_debug(self._tag, f"Cache file cleaned: {self.file_path}")
+                log_debug("FFmpeg Downloader", f"[{self._device_name}] Cache file cleaned: {self.file_path}")
         except Exception as e:
-            log_warning(self._tag, f"Failed to cleanup cache file: {e}")
+            log_warning("FFmpeg Downloader", f"[{self._device_name}] Failed to cleanup cache file: {e}")
 
     def cleanup(self):
         """
@@ -179,14 +181,14 @@ class FFmpegDownloader:
             os.makedirs(self._config.cache_dir, exist_ok=True)
         except Exception as e:
             self._error = f"Failed to create cache directory: {e}"
-            log_error(self._tag, self._error)
+            log_error("FFmpeg Downloader", f"[{self._device_name}] {self._error}")
             self._downloading = False
             return
 
-        log_debug(self._tag, f"Download started" +
+        log_debug("FFmpeg Downloader", f"[{self._device_name}] Download started" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
-        log_debug(self._tag, f"URL: {url}")
-        log_debug(self._tag, f"Cache file: {self.file_path}")
+        log_debug("FFmpeg Downloader", f"[{self._device_name}] URL: {url}")
+        log_debug("FFmpeg Downloader", f"[{self._device_name}] Cache file: {self.file_path}")
 
         cmd = ["ffmpeg", "-y"]  # Overwrite existing file / 覆盖已存在文件
 
@@ -220,25 +222,25 @@ class FFmpegDownloader:
 
             if not self._downloading:
                 # Manually stopped / 被手动停止
-                log_debug(self._tag, "Download cancelled")
+                log_debug("FFmpeg Downloader", f"[{self._device_name}] Download cancelled")
                 return
 
             exit_code = process.returncode
             if exit_code == 0:
                 self._completed = True
                 file_size = self.get_file_size()
-                log_debug(self._tag, f"Download completed: {file_size // 1024}KB")
+                log_debug("FFmpeg Downloader", f"[{self._device_name}] Download completed: {file_size // 1024}KB")
             else:
                 error_msg = stderr.decode("utf-8", errors="ignore")[:200] if stderr else "Unknown error"
                 self._error = error_msg
-                log_error(self._tag, f"Download failed (exit code {exit_code}): {error_msg}")
+                log_error("FFmpeg Downloader", f"[{self._device_name}] Download failed (exit code {exit_code}): {error_msg}")
 
         except Exception as e:
             self._error = str(e)
-            log_error(self._tag, f"Download error: {e}")
+            log_error("FFmpeg Downloader", f"[{self._device_name}] Download error: {e}")
 
         finally:
             self._process = None
             self._downloading = False
 
-        log_debug(self._tag, "Download thread ended")
+        log_debug("FFmpeg Downloader", f"[{self._device_name}] Download thread ended")

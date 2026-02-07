@@ -594,7 +594,7 @@ class DLNAService:
         # Block all actions from non-subscribed clients
         # 未订阅不执行操作(需要先进行 SetAVTransportURI)
         if not sid and action in ["Play", "Stop", "Pause", "Seek"]:
-            log_debug("AVTransport", f"Request rejected: {action} from non-subscribed client {req_ip}")
+            log_debug("DLNA", f"Reject: {req_ip} -> [AVTransport] {action} -> {device.device_name} reason=non-subscribed client")
             return web.Response(
                 status=500,
                 text=soap_error_response(701, "Client must subscribe to control device"),
@@ -617,7 +617,10 @@ class DLNAService:
                 "last_play_url": None,
                 "subscribe": "temp"
             }
-            log_debug("Subscribe", f"Temporary subscription created for {req_ip}: {sid[:20]}...")
+            log_debug("DLNA", f"{req_ip} -> [AVTransport] Temporary subscription -> {device.device_name}")
+
+        # Generate trace_id from SID (extract 8 chars after "uuid:")
+        trace_id = sid[5:13] if sid and len(sid) > 13 else "--------"
 
         # Set active client for control actions
         # 对此类操作标为为活跃设备
@@ -637,7 +640,6 @@ class DLNAService:
                 )
 
         if action == "SetAVTransportURI":
-            log_debug("SetAVTransportURI", f"{req_ip} -> body:\n{body}")
             match = re.search(r"<CurrentURI>([^<]*)</CurrentURI>", body)
             if match:
                 uri = self._decode_xml_entities(match.group(1))
@@ -651,11 +653,15 @@ class DLNAService:
                 subscribers[sid]["last_play_url"] = uri
 
                 # Parse metadata
+                title, artist, album, cover_url, duration_str = "", "", "", "", ""
                 metadata_match = re.search(r"<CurrentURIMetaData>([^<]*)</CurrentURIMetaData>", body)
                 if metadata_match:
                     metadata = self._decode_xml_entities(metadata_match.group(1))
-                    log_debug("SetAVTransportURI", f"metadata:\n{metadata}")
-                    self._parse_metadata(device, metadata)
+                    title, artist, album, cover_url, duration_str = self._parse_metadata(device, metadata)
+
+                log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] SetAVTransportURI -> {device.device_name} "
+                                 f"\nurl: {uri}"
+                                 f"\ntitle: {title} artist: {artist} album: {album} duration: {duration_str}")
 
                 # Probe media info asynchronously (non-blocking)
                 asyncio.create_task(self._probe_and_update_media_info(device, uri))
@@ -663,7 +669,6 @@ class DLNAService:
             response = soap_response("SetAVTransportURI", "AVTransport")
 
         elif action == "Play":
-            log_debug("Playback", f"{req_ip} -> Play Device Name: {device.device_name}")
             subscribers = self._get_device_subscribers(device.device_id)
 
             # 优先级策略：
@@ -677,13 +682,12 @@ class DLNAService:
             if not play_url:
                 # Fallback to device URL
                 play_url = device.play_url
-                log_debug("Playback", f"Using device URL for client {req_ip}")
 
             # 严格检查：如果仍然没有URL，拒绝播放
             # Strict check: reject play if still no URL available
             if not play_url:
-                log_warning("Playback",
-                           f"Play rejected - no URI available: {device.device_name}")
+                log_warning("DLNA",
+                           f"Reject: {req_ip} [{trace_id}] -> [AVTransport] Play -> {device.device_name} reason=no URI")
                 return web.Response(
                     status=500,
                     text=soap_error_response(701, "No media available for playback"),
@@ -691,25 +695,23 @@ class DLNAService:
                     charset="utf-8"
                 )
 
+            log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] Play -> {device.device_name} -> position: {device.play_position} url: {play_url}")
+
             # 记录到订阅者（用于下次恢复）
             # Record to subscriber (for next recovery)
             subscribers[sid]["last_play_url"] = play_url
 
-            event_bus.publish(cmd_play(device.device_id, play_url, device.play_position))
+            event_bus.publish(cmd_play(device.device_id, play_url, device.play_position, trace_id=trace_id))
             response = soap_response("Play", "AVTransport")
 
         elif action == "Stop":
-            log_debug("Playback", f"{req_ip} -> Stop: {device.device_name}")
-
-            # Publish stop command event
-            event_bus.publish(cmd_stop(device.device_id))
+            log_info("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] Stop -> {device.device_name}")
+            event_bus.publish(cmd_stop(device.device_id, trace_id=trace_id))
             response = soap_response("Stop", "AVTransport")
 
         elif action == "Pause":
-            log_debug("Playback", f"{req_ip} ->Pause: {device.device_name}")
-
-            # Publish pause command event
-            event_bus.publish(cmd_pause(device.device_id))
+            log_info("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] Pause -> {device.device_name}")
+            event_bus.publish(cmd_pause(device.device_id, trace_id=trace_id))
             response = soap_response("Pause", "AVTransport")
 
         elif action == "Seek":
@@ -718,7 +720,7 @@ class DLNAService:
             # 检查是否有媒体可以 Seek
             # Check if media is available for Seek
             if not device.play_url and device.play_duration == 0:
-                log_warning("Playback", f"Seek rejected - no media: {device.device_name}")
+                log_warning("DLNA", f"Reject: {req_ip} [{trace_id}] -> [AVTransport] Seek -> {device.device_name} reason=no media")
                 return web.Response(
                     status=500,
                     text=soap_error_response(701, "No media available for seek"),
@@ -728,7 +730,7 @@ class DLNAService:
 
             match = re.search(r"<Target>([^<]*)</Target>", body)
             if not match:
-                log_warning("Playback", f"Seek rejected - invalid target format: {device.device_name}")
+                log_warning("DLNA", f"Reject: {req_ip} [{trace_id}] -> [AVTransport] Seek -> {device.device_name} reason=invalid format")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, "Invalid Seek Target format"),
@@ -740,7 +742,7 @@ class DLNAService:
             try:
                 position = device.parse_time(target)
             except Exception as e:
-                log_warning("Playback", f"Seek rejected - invalid position: {target}")
+                log_warning("DLNA", f"Reject: {req_ip} [{trace_id}] -> [AVTransport] Seek -> {device.device_name} reason=invalid position ({target})")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, f"Invalid Seek Target: {target}"),
@@ -751,7 +753,7 @@ class DLNAService:
             # 检查位置是否超出范围
             # Check if position is out of range
             if position < 0 or (device.play_duration > 0 and position > device.play_duration):
-                log_warning("Playback", f"Seek rejected - position out of range: {position}")
+                log_warning("DLNA", f"Reject: {req_ip} [{trace_id}] -> [AVTransport] Seek -> {device.device_name} reason=out of range ({position})")
                 return web.Response(
                     status=500,
                     text=soap_error_response(714, f"Seek target {position} out of range"),
@@ -761,11 +763,10 @@ class DLNAService:
 
             # Filter: skip seek if position is same as current (Migu Music bug workaround)
             if abs(position - device.get_current_position()) < 1.0:
-                log_debug("Playback", f"Seek ignored (same position {position:.1f}s): {device.device_name}")
+                log_debug("DLNA", f"Reject: {req_ip} [{trace_id}] -> [AVTransport] Seek -> {device.device_name} reason=same position ({position:.1f}s)")
             else:
-                log_debug("Playback", f"{req_ip} -> Seek to {target}: {device.device_name}")
-                # Publish seek command event
-                event_bus.publish(cmd_seek(device.device_id, position))
+                log_info("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] Seek -> {device.device_name} position={target}")
+                event_bus.publish(cmd_seek(device.device_id, position, trace_id=trace_id))
 
             response = soap_response("Seek", "AVTransport")
 
@@ -782,14 +783,14 @@ class DLNAService:
       <AbsTime>{position_str}</AbsTime>
       <RelCount>2147483647</RelCount>
       <AbsCount>2147483647</AbsCount>""")
-            log_debug("GetPositionInfo", f"{req_ip} -> Position: {position_str}")
+            log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] GetPositionInfo -> {device.device_name} position={position_str}")
 
         elif action == "GetTransportInfo":
             response = soap_response("GetTransportInfo", "AVTransport", f"""
       <CurrentTransportState>{device.play_state}</CurrentTransportState>
       <CurrentTransportStatus>OK</CurrentTransportStatus>
       <CurrentSpeed>1</CurrentSpeed>""")
-            log_debug("GetTransportInfo", f"{req_ip} -> PlayState: {device.play_state}")
+            log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] GetTransportInfo -> {device.device_name} state={device.play_state}")
         elif action == "GetMediaInfo":
             duration_str = device.format_duration()
             uri_escaped = xml_escape(device.play_url) if device.play_url else ""
@@ -803,7 +804,7 @@ class DLNAService:
       <PlayMedium>NETWORK</PlayMedium>
       <RecordMedium>NOT_IMPLEMENTED</RecordMedium>
       <WriteStatus>NOT_IMPLEMENTED</WriteStatus>""")
-            log_debug("GetMediaInfo", f"{req_ip} -> Duration: {duration_str} UriEscaped: {uri_escaped}")
+            log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] GetMediaInfo -> {device.device_name} duration={duration_str}")
         # [DLNA standard] GetCurrentTransportActions - return available actions based on state
         elif action == "GetCurrentTransportActions":
             # Return available actions based on current state
@@ -817,7 +818,7 @@ class DLNAService:
                 actions = "Play"
             response = soap_response("GetCurrentTransportActions", "AVTransport",
                                      f"<Actions>{actions}</Actions>")
-            log_debug("GetCurrentTransportActions", f"{req_ip} -> Actions: {actions}")
+            log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] GetCurrentTransportActions -> {device.device_name} actions={actions}")
         else:
             response = soap_response(action or "Unknown", "AVTransport")
         return web.Response(text=response, content_type="text/xml", charset="utf-8")
@@ -836,7 +837,7 @@ class DLNAService:
         if action in ["SetVolume", "SetMute"]:
             active_ip, active_sid = device.get_active_client()
             if not active_sid:
-                log_warning("RenderingControl", f"Control rejected: {action} from {req_ip} (no active client)")
+                log_warning("DLNA", f"Reject: {req_ip} -> [RenderingControl] {action} -> {device.device_name} reason=no active client")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, "No active client for this device"),
@@ -844,7 +845,7 @@ class DLNAService:
                     charset="utf-8"
                 )
             if req_ip != active_ip:
-                log_warning("RenderingControl", f"Control rejected: {action} from non-active client {req_ip} (active: {active_ip})")
+                log_warning("DLNA", f"Reject: {req_ip} -> [RenderingControl] {action} -> {device.device_name} reason=non-active client (active: {active_ip})")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, "Only active client can control volume"),
@@ -860,17 +861,18 @@ class DLNAService:
                 try:
                     volume = output.get_volume()
                 except Exception as e:
-                    log_debug("RenderingControl", f"Failed to get volume from output: {e}")
+                    log_debug("DLNA", f"{req_ip} -> [RenderingControl] GetVolume -> {device.device_name} error={e}")
                     # Fall back to device cached volume if available
                     volume = device.volume if hasattr(device, 'volume') else 100
 
+            log_debug("DLNA", f"{req_ip} -> [RenderingControl] GetVolume -> {device.device_name} volume={volume}")
             response = soap_response("GetVolume", "RenderingControl",
                                      f"<CurrentVolume>{volume}</CurrentVolume>")
 
         elif action == "SetVolume":
             match = re.search(r"<DesiredVolume>(\d+)</DesiredVolume>", body)
             if not match:
-                log_warning("RenderingControl", f"SetVolume rejected - invalid format")
+                log_warning("DLNA", f"Reject: {req_ip} -> [RenderingControl] SetVolume -> {device.device_name} reason=invalid format")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, "Invalid DesiredVolume format"),
@@ -883,7 +885,7 @@ class DLNAService:
             # 验证音量范围
             # Validate volume range
             if volume < 0 or volume > 100:
-                log_warning("RenderingControl", f"SetVolume rejected - out of range: {volume}")
+                log_warning("DLNA", f"Reject: {req_ip} -> [RenderingControl] SetVolume -> {device.device_name} reason=out of range ({volume})")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, f"Volume must be 0-100, got {volume}"),
@@ -891,10 +893,12 @@ class DLNAService:
                     charset="utf-8"
                 )
 
-            log_info("Volume", f"Volume set to {volume}: {device.device_name}")
+            log_info("DLNA", f"{req_ip} -> [RenderingControl] SetVolume -> {device.device_name} volume={volume}")
 
-            # Publish set volume command event
-            event_bus.publish(cmd_set_volume(device.device_id, volume))
+            # Use active SID prefix as trace_id for event tracking
+            _, active_sid = device.get_active_client()
+            trace_id = active_sid[5:13] if active_sid and len(active_sid) > 13 else None
+            event_bus.publish(cmd_set_volume(device.device_id, volume, trace_id=trace_id))
             response = soap_response("SetVolume", "RenderingControl")
 
         elif action == "GetMute":
@@ -905,8 +909,9 @@ class DLNAService:
                 try:
                     muted = output.get_mute()
                 except Exception as e:
-                    log_debug("RenderingControl", f"Failed to get mute from output: {e}")
+                    log_debug("DLNA", f"{req_ip} -> [RenderingControl] GetMute -> {device.device_name} error={e}")
 
+            log_debug("DLNA", f"{req_ip} -> [RenderingControl] GetMute -> {device.device_name} muted={muted}")
             mute_val = "1" if muted else "0"
             response = soap_response("GetMute", "RenderingControl",
                                      f"<CurrentMute>{mute_val}</CurrentMute>")
@@ -914,7 +919,7 @@ class DLNAService:
         elif action == "SetMute":
             match = re.search(r"<DesiredMute>(\d+)</DesiredMute>", body)
             if not match:
-                log_warning("RenderingControl", f"SetMute rejected - invalid format")
+                log_warning("DLNA", f"Reject: {req_ip} -> [RenderingControl] SetMute -> {device.device_name} reason=invalid format")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, "Invalid DesiredMute format"),
@@ -925,7 +930,7 @@ class DLNAService:
             mute_val = match.group(1)
 
             if mute_val not in ["0", "1"]:
-                log_warning("RenderingControl", f"SetMute rejected - invalid value: {mute_val}")
+                log_warning("DLNA", f"Reject: {req_ip} -> [RenderingControl] SetMute -> {device.device_name} reason=invalid value ({mute_val})")
                 return web.Response(
                     status=500,
                     text=soap_error_response(402, f"Mute must be 0 or 1, got {mute_val}"),
@@ -934,10 +939,12 @@ class DLNAService:
                 )
 
             muted = mute_val == "1"
-            log_info("Mute", f"{'Muted' if muted else 'Unmuted'}: {device.device_name}")
+            log_info("DLNA", f"{req_ip} -> [RenderingControl] SetMute -> {device.device_name} muted={muted}")
 
-            # Publish set mute command event
-            event_bus.publish(cmd_set_mute(device.device_id, muted))
+            # Use active SID prefix as trace_id for event tracking
+            _, active_sid = device.get_active_client()
+            trace_id = active_sid[5:13] if active_sid and len(active_sid) > 13 else None
+            event_bus.publish(cmd_set_mute(device.device_id, muted, trace_id=trace_id))
             response = soap_response("SetMute", "RenderingControl")
 
         else:
@@ -951,8 +958,11 @@ class DLNAService:
                                  f"<Source></Source><Sink>{SINK_FORMATS}</Sink>")
         return web.Response(text=response, content_type="text/xml", charset="utf-8")
 
-    def _parse_metadata(self, device: "VirtualDevice", metadata: str):
-        """Parse and update device metadata from DIDL-Lite"""
+    def _parse_metadata(self, device: "VirtualDevice", metadata: str) -> tuple:
+        """
+        Parse and update device metadata from DIDL-Lite.
+        Returns tuple of (title, artist, album, cover_url, duration_str) for logging.
+        """
         # Standard format: <tag>text</tag>
         title_match = re.search(r'<dc:title>([^<]+)</dc:title>', metadata)
         artist_match = re.search(r'<upnp:artist[^>]*>([^<]+)</upnp:artist>', metadata)
@@ -972,11 +982,11 @@ class DLNAService:
         if not artist_match:
             artist_match = re.search(r'<dc:creator>([^<]+)</dc:creator>', metadata)
 
-        title = self._decode_xml_entities(title_match.group(1)) if title_match else "None"
-        artist = self._decode_xml_entities(artist_match.group(1)) if artist_match else "None"
-        album = self._decode_xml_entities(album_match.group(1)) if album_match else "None"
-        cover_url = self._decode_xml_entities(album_art_match.group(1)) if album_art_match else "None"
-        duration_str = duration_match.group(1) if duration_match else "None"
+        title = self._decode_xml_entities(title_match.group(1)) if title_match else "Unknown"
+        artist = self._decode_xml_entities(artist_match.group(1)) if artist_match else "Unknown"
+        album = self._decode_xml_entities(album_match.group(1)) if album_match else "Unknown"
+        cover_url = self._decode_xml_entities(album_art_match.group(1)) if album_art_match else "Unknown"
+        duration_str = duration_match.group(1) if duration_match else "Unknown"
 
         device.play_title = title
         device.play_artist = artist
@@ -984,7 +994,7 @@ class DLNAService:
         device.play_cover_url = cover_url
         device.play_duration = device.parse_time(duration_str)
 
-        # log_info("Metadata", f"\n\ttitle:  {title}\n\tartist: {artist}\n\talbum:  {album}\n\tduration: {duration_str}")
+        return title, artist, album, cover_url, duration_str
 
     async def _probe_and_update_media_info(self, device: "VirtualDevice", url: str):
         """
@@ -1013,37 +1023,34 @@ class DLNAService:
                 device.is_streaming = (duration == 0 or duration > 86400)
 
                 if device.is_streaming:
-                    log_info("MediaInfo", f"Detected streaming source (duration: {duration})")
+                    log_info("DLNA", f"Probe: {device.device_name} streaming=true duration={duration}")
 
                     # If configured, set play position to latest (current duration)
                     if STREAMING_SEEK_TO_LATEST and duration > 0:
                         device.play_position = duration
-                        log_info("MediaInfo", f"Streaming seek to latest position: {duration:.1f}s")
 
                 # Supplement missing metadata from ffprobe (when DLNA lacks them)
-                if (not device.play_title or device.play_title == "None") and media_info.get("title"):
+                if (not device.play_title or device.play_title == "Unknown") and media_info.get("title"):
                     device.play_title = media_info["title"]
-                if (not device.play_artist or device.play_artist == "None") and media_info.get("artist"):
+                if (not device.play_artist or device.play_artist == "Unknown") and media_info.get("artist"):
                     device.play_artist = media_info["artist"]
-                if (not device.play_album or device.play_album == "None") and media_info.get("album"):
+                if (not device.play_album or device.play_album == "Unknown") and media_info.get("album"):
                     device.play_album = media_info["album"]
                 if device.play_duration == 0 and media_info.get("duration", 0) > 0:
                     device.play_duration = media_info["duration"]
 
-                log_info("Metadata",
+                log_info("DLNA", f"Probe: {device.device_name}"
                          f"\n\ttitle:  {device.play_title}"
                          f"\n\tartist: {device.play_artist}"
                          f"\n\talbum:  {device.play_album}"
                          f"\n\tduration: {device._format_time(device.play_duration)}"
-                         )
-
-                log_debug("Metadata",f"\n\tformat: {device.audio_format}"
-                          f"\n\tsample rate: {device.audio_sample_rate}"
-                          f"\n\tbitrate: {device.audio_bitrate}"
-                          )
+                         f"\n\tcodec: {device.audio_format}"
+                         f"\n\tsample_rate: {device.audio_sample_rate}"
+                         f"\n\tbitrate: {device.audio_bitrate}"
+                         f"\n\tchannels: {device.audio_channels}")
 
         except Exception as e:
-            log_warning("MediaInfo", f"Failed to probe media: {e}")
+            log_warning("DLNA", f"Probe: {device.device_name} error={e}")
 
     # ================= UPnP GENA Event Notifications =================
 
@@ -1179,11 +1186,11 @@ class DLNAService:
                     ) as resp:
                         if resp.status < 300:
                             state_sent = device.play_state if is_active_client else "PAUSED_PLAYBACK"
-                            log_debug("Event", f"Notification sent ({client_type}): {state_sent} -> {device.device_name} -> {client_ip}")
+                            log_debug("GENA", f"Notification sent ({client_type}): {state_sent} -> {device.device_name} -> {client_ip} [{sid}]")
                         else:
-                            log_debug("Event", f"Notification failed ({resp.status})")
+                            log_debug("GENA", f"Notification failed ({resp.status}): {state_sent} -> {device.device_name} -> {client_ip} [{sid}]")
             except Exception as e:
-                log_debug("Event", f"Notification exception: {e}")
+                log_debug("GENA", f"Notification exception: {e}")
 
     # Clean up expired subscriptions
         for sid in expired_sids:

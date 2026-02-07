@@ -9,7 +9,7 @@ LOG_LEVEL_INFO = 1
 LOG_LEVEL_WARNING = 2
 LOG_LEVEL_ERROR = 3
 
-# Current log level (configurable)
+# Current log level (configurable, will be set based on config.DEBUG)
 _current_log_level = LOG_LEVEL_INFO
 
 
