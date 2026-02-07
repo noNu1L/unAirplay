@@ -20,6 +20,7 @@ import sys
 from typing import Optional
 
 from core.utils import log_info, log_debug
+from core.ffmpeg_checker import check_ffmpeg_or_exit
 from config import APP_NAME, APP_VERSION, LOCAL_IP, HTTP_PORT, WEB_PORT
 
 from device.device_manager import DeviceManager
@@ -138,6 +139,11 @@ class UnAirplay:
 
 def main():
     """Main entry point"""
+
+    # Check FFmpeg availability before starting
+    # 在启动前检查 FFmpeg 可用性
+    check_ffmpeg_or_exit("Startup")
+
     app = UnAirplay()
 
     def signal_handler(sig, frame):

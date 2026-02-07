@@ -11,8 +11,12 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libportaudio2 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/cache/apt/archives/* \
+    && rm -rf /usr/share/doc/* \
+    && rm -rf /usr/share/man/* \
+    && rm -rf /usr/share/locale/*
 
 # Copy Python packages from builder
 COPY --from=builder /root/.local /root/.local
