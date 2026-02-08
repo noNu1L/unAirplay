@@ -87,10 +87,8 @@ class DeviceManager:
                     try:
                         if hasattr(output, 'loop') and output.loop:
                             log_info("DeviceManager", f"Re-establishing connection: {device.device_name}")
-                            asyncio.run_coroutine_threadsafe(
-                                self._reconnect_output(output, device.device_name),
-                                self._loop
-                            )
+                            # Use output's own event loop to avoid "different loop" error
+                            output.run_coroutine(self._reconnect_output(output, device.device_name))
                     except Exception as e:
                         log_warning("DeviceManager", f"Reconnection scheduling failed: {e}")
 

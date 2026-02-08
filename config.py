@@ -5,7 +5,11 @@ import socket
 
 # ================= Application Info =================
 APP_NAME = "unAirplay"
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
+
+# ================= Debug Configuration =================
+# Enable debug mode (enables DEBUG level logging and Test API)
+DEBUG = False
 
 # ================= Network Configuration =================
 HTTP_PORT = 6088

@@ -136,6 +136,9 @@ class VirtualDevice:
     def create_airplay_device(cls, airplay_info: Dict[str, Any]) -> "VirtualDevice":
         """Create a virtual device from AirPlay device info."""
         name = airplay_info.get("name", "Unknown")
+        if isinstance(name, str):
+            name = name.strip()
+            
         airplay_id = airplay_info.get("identifier")
         return cls(
             device_id=generate_device_id(airplay_id, "airplay"),
@@ -191,7 +194,7 @@ class VirtualDevice:
         position = event.data.get("position", 0.0)  # Extract position, default to 0
 
         if not url:
-            log_warning("VirtualDevice", f"Play command without URL: {self.device_name}")
+            log_warning("VirtualDevice", f"[{event.trace_id}] Play command without URL: {self.device_name}")
             return
 
         # Update metadata if provided
@@ -206,51 +209,52 @@ class VirtualDevice:
         if "duration" in event.data:
             self.play_duration = event.data.get("duration", 0.0)
 
-        self._execute_play(url, position)
+        self._execute_play(url, position, event.trace_id)
 
     def _on_cmd_stop(self, event: Event):
         """Handle stop command"""
-        self._execute_stop()
+        self._execute_stop(event.trace_id)
 
     def _on_cmd_pause(self, event: Event):
         """Handle pause command"""
-        self._execute_pause()
+        self._execute_pause(event.trace_id)
 
     def _on_cmd_seek(self, event: Event):
         """Handle seek command"""
         position = event.data.get("position", 0.0)
-        self._execute_seek(position)
+        self._execute_seek(position, event.trace_id)
 
     def _on_cmd_volume(self, event: Event):
         """Handle volume command"""
         volume = event.data.get("volume", 100)
-        self._execute_set_volume(volume)
+        self._execute_set_volume(volume, event.trace_id)
 
     def _on_cmd_mute(self, event: Event):
         """Handle mute command"""
         muted = event.data.get("muted", False)
-        self._execute_set_mute(muted)
+        self._execute_set_mute(muted, event.trace_id)
 
     def _on_cmd_dsp(self, event: Event):
         """Handle DSP configuration command"""
         enabled = event.data.get("enabled", False)
         config = event.data.get("config", {})
-        self._execute_set_dsp(enabled, config)
+        self._execute_set_dsp(enabled, config, event.trace_id)
 
     def _on_cmd_reset_dsp(self, event: Event):
         """Handle reset DSP command"""
-        self._execute_reset_dsp()
+        self._execute_reset_dsp(event.trace_id)
 
     # ===== Command Execution =====
 
-    def _execute_play(self, url: str, position: float = 0.0):
+    def _execute_play(self, url: str, position: float = 0.0, trace_id: str = "--------"):
         """Execute play command
 
         Args:
             url: Media URL to play
             position: Start position in seconds (default: 0.0)
+            trace_id: Trace ID for logging
         """
-        log_info("VirtualDevice", f"Play: {self.device_name} (position: {position}s)")
+        log_info("VirtualDevice", f"[{trace_id}] Play: {self.device_name} position={position}s")
 
         self.play_url = url
         self.play_state = "PLAYING"
@@ -269,9 +273,9 @@ class VirtualDevice:
             url=url
         ))
 
-    def _execute_stop(self):
+    def _execute_stop(self, trace_id: str = "--------"):
         """Execute stop command"""
-        log_info("VirtualDevice", f"Stop: {self.device_name}")
+        log_info("VirtualDevice", f"[{trace_id}] Stop: {self.device_name}")
 
         self.play_state = "STOPPED"
         self.play_position = 0.0
@@ -283,9 +287,9 @@ class VirtualDevice:
 
         event_bus.publish(state_changed(self.device_id, state="STOPPED"))
 
-    def _execute_pause(self):
+    def _execute_pause(self, trace_id: str = "--------"):
         """Execute pause command"""
-        log_info("VirtualDevice", f"Pause: {self.device_name}")
+        log_info("VirtualDevice", f"[{trace_id}] Pause: {self.device_name}")
 
         # Save current position
         if self.play_state == "PLAYING" and self.play_start_time > 0:
@@ -301,9 +305,9 @@ class VirtualDevice:
 
         event_bus.publish(state_changed(self.device_id, state="PAUSED_PLAYBACK"))
 
-    def _execute_seek(self, position: float):
+    def _execute_seek(self, position: float, trace_id: str = "--------"):
         """Execute seek command"""
-        log_info("VirtualDevice", f"Seek to {position}s: {self.device_name}")
+        log_info("VirtualDevice", f"[{trace_id}] Seek: {self.device_name} position={position}s")
 
         self.play_position = position
         if self.play_state == "PLAYING":
@@ -313,43 +317,43 @@ class VirtualDevice:
         if self._output:
             self._output.handle_action("seek", position=position)
 
-    def _execute_set_volume(self, volume: int):
+    def _execute_set_volume(self, volume: int, trace_id: str = "--------"):
         """Execute set volume command"""
         self.volume = max(0, min(100, volume))
-        log_debug("VirtualDevice", f"Volume: {self.volume}%: {self.device_name}")
+        log_debug("VirtualDevice", f"[{trace_id}] Volume: {self.device_name} volume={self.volume}%")
 
         if self._output:
             self._output.handle_action("set_volume", volume=self.volume)
 
         event_bus.publish(volume_changed(self.device_id, self.volume, self.muted))
 
-    def _execute_set_mute(self, muted: bool):
+    def _execute_set_mute(self, muted: bool, trace_id: str = "--------"):
         """Execute set mute command"""
         self.muted = muted
-        log_debug("VirtualDevice", f"Mute: {muted}: {self.device_name}")
+        log_debug("VirtualDevice", f"[{trace_id}] Mute: {self.device_name} muted={muted}")
 
         if self._output:
             self._output.handle_action("set_mute", muted=muted)
 
         event_bus.publish(volume_changed(self.device_id, self.volume, self.muted))
 
-    def _execute_set_dsp(self, enabled: bool, config: dict):
+    def _execute_set_dsp(self, enabled: bool, config: dict, trace_id: str = "--------"):
         """Execute set DSP command"""
         self.dsp_enabled = enabled
         if config:
             self.dsp_config.update(config)
 
-        log_info("VirtualDevice", f"DSP {'enabled' if enabled else 'disabled'}: {self.device_name}")
+        log_info("VirtualDevice", f"[{trace_id}] DSP: {self.device_name} enabled={enabled}")
 
         # Publish DSP changed event (ConfigStore will save it)
         event_bus.publish(dsp_changed(self.device_id, enabled, self.dsp_config))
 
-    def _execute_reset_dsp(self):
+    def _execute_reset_dsp(self, trace_id: str = "--------"):
         """Execute reset DSP command"""
         self.dsp_enabled = False
         self.dsp_config = copy.deepcopy(DEFAULT_DSP_CONFIG)
 
-        log_info("VirtualDevice", f"DSP reset: {self.device_name}")
+        log_info("VirtualDevice", f"[{trace_id}] DSP Reset: {self.device_name}")
 
         event_bus.publish(dsp_changed(self.device_id, False, self.dsp_config))
 

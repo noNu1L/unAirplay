@@ -2,6 +2,7 @@
 Logging utilities module
 """
 from datetime import datetime
+import threading
 
 # Log levels
 LOG_LEVEL_DEBUG = 0
@@ -9,8 +10,11 @@ LOG_LEVEL_INFO = 1
 LOG_LEVEL_WARNING = 2
 LOG_LEVEL_ERROR = 3
 
-# Current log level (configurable)
+# Current log level (configurable, will be set based on config.DEBUG)
 _current_log_level = LOG_LEVEL_INFO
+
+# Lock for atomic logging
+_log_lock = threading.Lock()
 
 
 def set_log_level(level: int):
@@ -31,7 +35,11 @@ def log(tag: str, message: str, level: int = LOG_LEVEL_INFO):
     if level < _current_log_level:
         return
 
-    now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    now = datetime.now()
+    timestamp = now.strftime("%Y/%m/%d %H:%M:%S")
+    milliseconds = now.microsecond // 1000  # Convert microseconds to milliseconds
+    formatted_time = f"{timestamp}.{milliseconds:03d}"
+
     level_str = {
         LOG_LEVEL_DEBUG: "DEBUG",
         LOG_LEVEL_INFO: "INFO",
@@ -39,7 +47,8 @@ def log(tag: str, message: str, level: int = LOG_LEVEL_INFO):
         LOG_LEVEL_ERROR: "ERROR"
     }.get(level, "INFO")
 
-    print(f"[{now}] [{level_str}] [{tag}] {message}")
+    with _log_lock:
+        print(f"[{formatted_time}] [{level_str}] [{tag}] {message}", flush=True)
 
 
 def log_debug(tag: str, message: str):
