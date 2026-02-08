@@ -35,7 +35,11 @@ def log(tag: str, message: str, level: int = LOG_LEVEL_INFO):
     if level < _current_log_level:
         return
 
-    now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    now = datetime.now()
+    timestamp = now.strftime("%Y/%m/%d %H:%M:%S")
+    milliseconds = now.microsecond // 1000  # Convert microseconds to milliseconds
+    formatted_time = f"{timestamp}.{milliseconds:03d}"
+
     level_str = {
         LOG_LEVEL_DEBUG: "DEBUG",
         LOG_LEVEL_INFO: "INFO",
@@ -44,7 +48,7 @@ def log(tag: str, message: str, level: int = LOG_LEVEL_INFO):
     }.get(level, "INFO")
 
     with _log_lock:
-        print(f"[{now}] [{level_str}] [{tag}] {message}", flush=True)
+        print(f"[{formatted_time}] [{level_str}] [{tag}] {message}", flush=True)
 
 
 def log_debug(tag: str, message: str):

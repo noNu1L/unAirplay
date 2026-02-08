@@ -125,6 +125,10 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         self._first_data_received = False
         self.play_url = None  # For local stream direct playback
 
+        # Frame counter for tracking sent data
+        self._total_frames_sent = 0
+        self._send_start_time = 0.0  # Wall clock time when first frame was sent
+
     @property
     def sample_rate(self) -> int:
         """Return sample rate."""
@@ -306,6 +310,7 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
 
             if not self._first_data_received:
                 self._first_data_received = True
+                self._send_start_time = time.time()
                 log_debug(self._tag, f"[{device_name}] First audio data received")
 
                 try:
@@ -321,6 +326,10 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
                     pcm_data = self._apply_dsp(pcm_data)
                 except Exception as e:
                     log_warning(self._tag, f"[{self._device_name_str}] DSP error: {e}")
+
+            # Track sent frames
+            actual_frames = len(pcm_data) // (self._channels * self.SAMPLE_SIZE)
+            self._total_frames_sent += actual_frames
 
             # Convert to format expected by pyatv (byteswap on little-endian systems)
             return _to_audio_samples(pcm_data)

@@ -8,6 +8,7 @@ import asyncio
 import queue
 import threading
 import sys
+import time
 from typing import Optional, TYPE_CHECKING
 
 import pyatv
@@ -255,6 +256,11 @@ class AirPlayOutput(BaseOutput):
             # Log pyatv context info
             log_debug("AirPlayOutput", f"pyatv context: sample_rate={context.sample_rate}, channels={context.channels}")
 
+            # Reset DSP internal buffers to prevent old audio leaking into new song
+            # - FFT 和 FIR 会保留旧的采样音频，播放新的歌曲会有残留音频
+            if self._enhancer and hasattr(self._enhancer, 'reset_all'):
+                self._enhancer.reset_all()
+
             # Create AudioSource (with or without DSP)
             # Pass device for live DSP config updates
             # Build metadata dict from device state
@@ -296,6 +302,22 @@ class AirPlayOutput(BaseOutput):
 
             # Send audio using our custom source
             await client.send_audio(self._current_source, file_metadata, volume=volume)
+
+            # Calculate AirPlay buffer delay
+            # 计算 AirPlay 缓冲延迟
+
+            # pyatv 的 send_audio() 应该会做速率调整
+            # buffer_delay 为负数则说明 pyatv播放时间大于音频数据时间，能完整播放完这首歌曲
+            # buffer_delay 为正数则说明歌曲尾部会被切掉
+
+            source = self._current_source
+            if source and source._total_frames_sent > 0 and source._send_start_time > 0:
+                audio_duration = source._total_frames_sent / source._sample_rate
+                wall_time = time.time() - source._send_start_time
+                buffer_delay = audio_duration - wall_time
+                log_debug("AirPlayOutput", f"[{self._device.device_name}] AirPlay buffer delay: "
+                         f"audio_duration={audio_duration:.2f}s, wall_time={wall_time:.2f}s, "
+                         f"buffer_delay={buffer_delay:.2f}s, total_frames={source._total_frames_sent}")
 
             log_debug("AirPlayOutput", f"{self._device.device_name}: Stream completed")
 
