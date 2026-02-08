@@ -1,6 +1,16 @@
 FROM python:3.11-slim AS builder
 
 WORKDIR /app
+
+# Install build dependencies for compiling Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    gfortran \
+    libopenblas-dev \
+    liblapack-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY docker/requirements-docker.txt .
 RUN pip install --no-cache-dir --user -r requirements-docker.txt
 
@@ -11,6 +21,8 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libportaudio2 \
+    libopenblas0 \
+    libgomp1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/cache/apt/archives/* \
