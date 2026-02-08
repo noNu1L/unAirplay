@@ -117,6 +117,13 @@ class EventBus:
         2. Event type handlers
         3. Device-specific handlers (if device_id matches)
         """
+        # Log event publish with trace_id
+        device_info = event.device_id if event.device_id else "global"
+        extra_info = ""
+        if event.type == EventType.STATE_CHANGED:
+            extra_info = f" state={event.data.get('state', '?')}"
+        log_debug("EventBus", f"[{event.trace_id}] Publish: {event.type.name} -> {device_info}{extra_info}")
+
         handlers_to_call = []
 
         # Collect wildcard handlers
@@ -133,6 +140,8 @@ class EventBus:
         # Call all handlers
         for handler in handlers_to_call:
             try:
+                handler_name = getattr(handler, '__name__', str(handler))
+                log_debug("EventBus", f"[{event.trace_id}] Handle: {event.type.name} -> {handler_name}")
                 result = handler(event)
                 # If coroutine, schedule to event loop
                 if asyncio.iscoroutine(result):
@@ -150,10 +159,17 @@ class EventBus:
                             pass
             except Exception as e:
                 handler_name = getattr(handler, '__name__', str(handler))
-                log_warning("EventBus", f"Handler error ({handler_name}): {e}")
+                log_warning("EventBus", f"[{event.trace_id}] Handler error ({handler_name}): {e}")
 
     async def publish_async(self, event: Event):
         """Publish event (asynchronous)"""
+        # Log event publish with trace_id
+        device_info = event.device_id if event.device_id else "global"
+        extra_info = ""
+        if event.type == EventType.STATE_CHANGED:
+            extra_info = f" state={event.data.get('state', '?')}"
+        log_debug("EventBus", f"[{event.trace_id}] Publish(async): {event.type.name} -> {device_info}{extra_info}")
+
         handlers_to_call = []
 
         handlers_to_call.extend(self._wildcard_handlers)
@@ -167,12 +183,14 @@ class EventBus:
         tasks = []
         for handler in handlers_to_call:
             try:
+                handler_name = getattr(handler, '__name__', str(handler))
+                log_debug("EventBus", f"[{event.trace_id}] Handle: {event.type.name} -> {handler_name}")
                 result = handler(event)
                 if asyncio.iscoroutine(result):
                     tasks.append(result)
             except Exception as e:
                 handler_name = getattr(handler, '__name__', str(handler))
-                log_warning("EventBus", f"Handler error ({handler_name}): {e}")
+                log_warning("EventBus", f"[{event.trace_id}] Handler error ({handler_name}): {e}")
 
         # Execute all async handlers concurrently
         if tasks:

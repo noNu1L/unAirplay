@@ -35,6 +35,14 @@ docker compose up -d
 
 ### 2. Run Locally
 
+**Prerequisites:**
+- **FFmpeg**: Required for audio processing. Must be installed and added to system PATH.
+  - **Windows**:
+    - Option 1: `winget install ffmpeg`
+    - Option 2: Download from [ffmpeg.org](https://ffmpeg.org/download.html), extract to your installation directory (e.g., `C:\Program Files\ffmpeg`), and add the `bin` folder to system PATH (System Properties → Environment Variables → Path → New)
+  - **Linux**: `sudo apt install ffmpeg`
+  - **macOS**: `brew install ffmpeg`
+
 Install dependencies:
 
 ```bash

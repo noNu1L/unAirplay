@@ -41,7 +41,7 @@ class FFmpegDecoder:
     启动 FFmpeg 进程，将输入源解码为 PCM 流输出到 stdout。
     """
 
-    def __init__(self, config: DecoderConfig, tag: str = "FFmpegDecoder"):
+    def __init__(self, config: DecoderConfig, tag: str = "FFmpegDecoder", device_name: str = ""):
         """
         Initialize decoder
         初始化解码器
@@ -49,9 +49,11 @@ class FFmpegDecoder:
         Args:
             config: Decoder configuration / 解码器配置
             tag: Log tag / 日志标签
+            device_name: Device name for logging / 设备名称用于日志
         """
         self._config = config
         self._tag = tag
+        self._device_name = device_name
         self._process: Optional[subprocess.Popen] = None
         self._started = False
 
@@ -126,11 +128,11 @@ class FFmpegDecoder:
             "pipe:1"  # Output to stdout / 输出到 stdout
         ])
 
-        log_debug(self._tag, f"Starting decoder: {self._config.pcm_format.name}, "
+        log_debug("FFmpeg Decoder", f"{self._device_name}: Starting decoder: {self._config.pcm_format.name}, "
                  f"rate={self._config.sample_rate}, channels={self._config.channels}" +
                  (f", seek={self._config.seek_position}s" if self._config.seek_position > 0 else "") +
                  (", realtime" if self._config.realtime else ""))
-        log_debug(self._tag, f"Input: {input_source}")
+        log_debug("FFmpeg Decoder", f"{self._device_name}: Input: {input_source}")
 
         try:
             kwargs = get_subprocess_kwargs()
@@ -147,7 +149,7 @@ class FFmpegDecoder:
             self._started = True
 
         except Exception as e:
-            log_error(self._tag, f"Failed to start decoder: {e}")
+            log_error("FFmpeg Decoder", f"{self._device_name}: Failed to start decoder: {e}")
             self._process = None
 
         return self._process
