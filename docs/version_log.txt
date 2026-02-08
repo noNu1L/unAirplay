@@ -9,15 +9,22 @@ Technical implementation details are not included.
 
 ---
 
-v1.1.3
+v1.1.3 (2026-02-08)
 -------------------
 
-1. FFmpeg Startup Check / FFmpeg 启动检查
+1. Bug Fix: Audio Glitch on Song Switch / 修复：切歌时的音频杂音
 
+   - Fixed old audio briefly playing when switching to next song
+   - 修复切换到下一首歌曲时短暂播放旧音频的问题
+
+2. FFmpeg Installation Guide & Startup Check / FFmpeg 安装指南与启动检查
+
+   - Improved installation guide with clearer instructions
    - Check FFmpeg installation before startup, show installation guide if not found
+   - 改进安装指南，提供更清晰的说明
    - 启动前检查 FFmpeg 安装状态，未安装时显示安装指引
 
-2. Docker Image Optimization / Docker 镜像优化
+3. Docker Image Optimization / Docker 镜像优化
 
    - Reduced Docker image size
    - 减小 Docker 镜像体积
