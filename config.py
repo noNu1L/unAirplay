@@ -1,7 +1,41 @@
 """
 unAirplay - Global Configuration
 """
+import os
 import socket
+
+
+def _get_env_bool(key: str, default: bool) -> bool:
+    """Get boolean value from environment variable"""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value.lower() in "true"
+
+def _get_env_int(key: str, default: int) -> int:
+    """Get integer value from environment variable"""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _get_env_str(key: str, default: str) -> str:
+    """Get string value from environment variable"""
+    return os.getenv(key, default)
+
+
+def _get_env_list(key: str, default: list) -> list:
+    """Get list value from environment variable (comma-separated)"""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    # Split by comma and strip whitespace
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 
 # ================= Application Info =================
 APP_NAME = "unAirplay"
@@ -9,14 +43,14 @@ APP_VERSION = "1.1.3"
 
 # ================= Debug Configuration =================
 # Enable debug mode (enables DEBUG level logging and Test API)
-DEBUG = False
+DEBUG = _get_env_bool("DEBUG", False)
 
 # ================= Network Configuration =================
-HTTP_PORT = 6088
-WEB_PORT = 6089
+HTTP_PORT = _get_env_int("HTTP_PORT", 6088)
+WEB_PORT = _get_env_int("WEB_PORT", 6089)
 
 SSDP_MULTICAST_ADDR = "239.255.255.250"
-SSDP_PORT = 1900
+SSDP_PORT = _get_env_int("SSDP_PORT", 1900)
 
 
 def get_local_ip():
@@ -35,10 +69,10 @@ LOCAL_IP = get_local_ip()
 
 # ================= Virtual Device Configuration =================
 # Device name suffix for virtual DLNA devices
-DEVICE_SUFFIX = "[D]"
+DEVICE_SUFFIX = _get_env_str("DEVICE_SUFFIX", "[D]")
 
 # Server Speaker device name
-SERVER_SPEAKER_NAME = "Server Speaker"
+SERVER_SPEAKER_NAME = _get_env_str("SERVER_SPEAKER_NAME", "Server Speaker")
 
 # ================= Audio Configuration =================
 SAMPLE_RATE = 44100          # Output sample rate
@@ -73,17 +107,17 @@ STREAMING_SEEK_TO_LATEST = True
 AIRPLAY_SCAN_INTERVAL = 30
 
 # Timeout for AirPlay device discovery (seconds)
-AIRPLAY_SCAN_TIMEOUT = 5
+AIRPLAY_SCAN_TIMEOUT = _get_env_int("AIRPLAY_SCAN_TIMEOUT", 5)
 
 # Exclude devices by IP address or name
 # 按IP或名字地址排除设备，例如: ["192.168.1.100", "小喇叭"]
-AIRPLAY_EXCLUDE = []
+AIRPLAY_EXCLUDE = _get_env_list("AIRPLAY_EXCLUDE", [])
 
 # Device offline detection configuration
 # 设备离线检测配置
 # Device will be removed after this many consecutive failed scans
 # 设备连续多少次扫描未检测到后，删除虚拟设备
-AIRPLAY_OFFLINE_THRESHOLD = 10
+AIRPLAY_OFFLINE_THRESHOLD = _get_env_int("AIRPLAY_OFFLINE_THRESHOLD", 10)
 
 # ================= Server Speaker Configuration =================
 # Whether to enable the Server Speaker virtual device (output to the local speaker of the server)
@@ -91,7 +125,7 @@ AIRPLAY_OFFLINE_THRESHOLD = 10
 #   1. Detect if there is an audio output device in the system
 #   2. If there is a device, create the Server Speaker virtual device
 #   3. If there is no device, output a warning in the log
-ENABLE_SERVER_SPEAKER = True
+ENABLE_SERVER_SPEAKER = _get_env_bool("ENABLE_SERVER_SPEAKER", True)
 
 # ================= DSP Default Configuration =================
 DEFAULT_DSP_CONFIG = {
