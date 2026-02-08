@@ -18,7 +18,27 @@ This project integrates DSP (Digital Signal Processing) functionality for adjust
 
 ## How to Use
 
-### 1. Deploy with Docker (Recommended)
+### 1. Deploy with Docker Hub Image (Recommended)
+
+Pull and run the pre-built Docker image:
+
+```bash
+docker run -d \
+  --name un-airplay \
+  --network host \
+  --restart unless-stopped \
+  youmiepie/un-airplay:latest
+```
+
+**Docker Hub**: [youmiepie/un-airplay](https://hub.docker.com/r/youmiepie/un-airplay)
+
+**Supported Platforms**:
+- `linux/amd64` (x86_64)
+- `linux/arm64` (ARM64/Apple Silicon)
+
+### 2. Build Docker Image Locally (Alternative)
+
+If you have network issues pulling from Docker Hub, you can build locally:
 
 Clone the source code:
 
@@ -33,7 +53,7 @@ Start the service:
 docker compose up -d
 ```
 
-### 2. Run Locally
+### 3. Run Locally
 
 **Prerequisites:**
 - **FFmpeg**: Required for audio processing. Must be installed and added to system PATH.

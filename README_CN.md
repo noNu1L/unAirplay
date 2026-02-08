@@ -18,7 +18,27 @@ unAirplay 是一个音频桥接工具。它能将 DLNA/UPnP 协议的音频流�
 
 ## 如何使用
 
-### 1. 使用 Docker 部署（推荐）
+### 1. 使用 Docker Hub 镜像部署（推荐）
+
+拉取并运行预构建的 Docker 镜像：
+
+```bash
+docker run -d \
+  --name un-airplay \
+  --network host \
+  --restart unless-stopped \
+  youmiepie/un-airplay:latest
+```
+
+**Docker Hub**: [youmiepie/un-airplay](https://hub.docker.com/r/youmiepie/un-airplay)
+
+**支持的平台**：
+- `linux/amd64` (x86_64)
+- `linux/arm64` (ARM64/Apple Silicon)
+
+### 2. 本地构建 Docker 镜像（备用）
+
+如果网络不好无法从 Docker Hub 拉取镜像，可以本地构建：
 
 克隆源码：
 
@@ -33,7 +53,7 @@ cd unAirplay/docker
 docker compose up -d
 ```
 
-### 2. 本地运行
+### 3. 本地运行
 
 **前置要求：**
 - **FFmpeg**：音频处理必需。需要安装并添加到系统环境变量 PATH。
