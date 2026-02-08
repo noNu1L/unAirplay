@@ -19,9 +19,8 @@ import signal
 import sys
 from typing import Optional
 
-from core.utils import log_info, set_log_level, LOG_LEVEL_DEBUG, LOG_LEVEL_INFO
-from core.ffmpeg_checker import check_ffmpeg_or_exit
-from config import APP_NAME, APP_VERSION, DEBUG
+from core.utils import log_info, log_debug
+from config import APP_NAME, APP_VERSION, LOCAL_IP, HTTP_PORT, WEB_PORT
 
 from device.device_manager import DeviceManager
 from device.virtual_device import VirtualDevice
@@ -52,7 +51,7 @@ class UnAirplay:
         self._server_speaker: Optional[ServerSpeakerOutput] = None
 
         # Web server (communicates via events)
-        self._web_server = WebServer(self._device_manager, self._dlna_service)
+        self._web_server = WebServer(self._device_manager)
 
         # Event loop reference
         self._loop = None
@@ -139,18 +138,6 @@ class UnAirplay:
 
 def main():
     """Main entry point"""
-
-    # Set log level based on DEBUG configuration
-    if DEBUG:
-        set_log_level(LOG_LEVEL_DEBUG)
-        log_info("Startup", "DEBUG mode enabled - Log level set to DEBUG")
-    else:
-        set_log_level(LOG_LEVEL_INFO)
-
-    # Check FFmpeg availability before starting
-    # 在启动前检查 FFmpeg 可用性
-    check_ffmpeg_or_exit("Startup")
-
     app = UnAirplay()
 
     def signal_handler(sig, frame):

@@ -8,12 +8,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 from enum import Enum, auto
 import time
-import uuid
-
-
-def generate_trace_id() -> str:
-    """Generate a random 8-character trace ID for event tracking"""
-    return uuid.uuid4().hex[:8]
 
 
 class EventType(Enum):
@@ -62,102 +56,76 @@ class Event:
         device_id: Target device ID (None = broadcast)
         data: Event data dictionary
         timestamp: Event creation timestamp
-        trace_id: 8-character ID for event tracking (auto-generated if not provided)
     """
     type: EventType
     device_id: Optional[str] = None
     data: Dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
-    trace_id: str = field(default_factory=generate_trace_id)
 
     def __repr__(self):
-        return f"Event({self.type.name}, device={self.device_id if self.device_id else 'all'}..., trace={self.trace_id})"
+        return f"Event({self.type.name}, device={self.device_id if self.device_id else 'all'}...)"
 
 
 # ===== Command Event Factories =====
 
-def cmd_play(device_id: str, url: str, position: float = 0.0, trace_id: str = None, **metadata) -> Event:
+def cmd_play(device_id: str, url: str, position: float = 0.0, **metadata) -> Event:
     """Create play command event"""
-    event = Event(
+    return Event(
         type=EventType.CMD_PLAY,
         device_id=device_id,
         data={"url": url, "position": position, **metadata}
     )
-    if trace_id:
-        event.trace_id = trace_id
-    return event
 
 
-def cmd_stop(device_id: str, trace_id: str = None) -> Event:
+def cmd_stop(device_id: str) -> Event:
     """Create stop command event"""
-    event = Event(type=EventType.CMD_STOP, device_id=device_id)
-    if trace_id:
-        event.trace_id = trace_id
-    return event
+    return Event(type=EventType.CMD_STOP, device_id=device_id)
 
 
-def cmd_pause(device_id: str, trace_id: str = None) -> Event:
+def cmd_pause(device_id: str) -> Event:
     """Create pause command event"""
-    event = Event(type=EventType.CMD_PAUSE, device_id=device_id)
-    if trace_id:
-        event.trace_id = trace_id
-    return event
+    return Event(type=EventType.CMD_PAUSE, device_id=device_id)
 
 
-def cmd_seek(device_id: str, position: float, trace_id: str = None) -> Event:
+def cmd_seek(device_id: str, position: float) -> Event:
     """Create seek command event"""
-    event = Event(
+    return Event(
         type=EventType.CMD_SEEK,
         device_id=device_id,
         data={"position": position}
     )
-    if trace_id:
-        event.trace_id = trace_id
-    return event
 
 
-def cmd_set_volume(device_id: str, volume: int, trace_id: str = None) -> Event:
+def cmd_set_volume(device_id: str, volume: int) -> Event:
     """Create set volume command event"""
-    event = Event(
+    return Event(
         type=EventType.CMD_SET_VOLUME,
         device_id=device_id,
         data={"volume": volume}
     )
-    if trace_id:
-        event.trace_id = trace_id
-    return event
 
 
-def cmd_set_mute(device_id: str, muted: bool, trace_id: str = None) -> Event:
+def cmd_set_mute(device_id: str, muted: bool) -> Event:
     """Create set mute command event"""
-    event = Event(
+    return Event(
         type=EventType.CMD_SET_MUTE,
         device_id=device_id,
         data={"muted": muted}
     )
-    if trace_id:
-        event.trace_id = trace_id
-    return event
 
 
-def cmd_set_dsp(device_id: str, enabled: bool, config: dict = None, trace_id: str = None) -> Event:
+def cmd_set_dsp(device_id: str, enabled: bool, config: dict = None) -> Event:
     """Create DSP configuration command event"""
-    event = Event(
+    return Event(
         type=EventType.CMD_SET_DSP,
         device_id=device_id,
         data={"enabled": enabled, "config": config or {}}
     )
-    if trace_id:
-        event.trace_id = trace_id
-    return event
 
 
-def cmd_reset_dsp(device_id: str, trace_id: str = None) -> Event:
+def cmd_reset_dsp(device_id: str) -> Event:
     """Create reset DSP command event"""
-    event = Event(type=EventType.CMD_RESET_DSP, device_id=device_id)
-    if trace_id:
-        event.trace_id = trace_id
-    return event
+    return Event(type=EventType.CMD_RESET_DSP, device_id=device_id)
 
 
 # ===== State Event Factories =====

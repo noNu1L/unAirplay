@@ -8,7 +8,6 @@ import asyncio
 import queue
 import threading
 import sys
-import time
 from typing import Optional, TYPE_CHECKING
 
 import pyatv
@@ -86,11 +85,11 @@ class AirPlayOutput(BaseOutput):
             True if connected successfully
         """
         if not self._device.airplay_id:
-            log_warning("AirPlayOutput", f"{self._device.device_name}: No AirPlay ID")
+            log_warning("AirPlayOutput", f"No AirPlay ID for: {self._device.device_name}")
             return False
 
         try:
-            log_debug("AirPlayOutput", f"{self._device.device_name}: Connecting ({self._device.airplay_address})")
+            log_debug("AirPlayOutput", f"Connecting to: {self._device.device_name} ({self._device.airplay_address})")
 
             # Scan for target device
             atvs = await pyatv.scan(
@@ -107,13 +106,13 @@ class AirPlayOutput(BaseOutput):
                     break
 
             if not target_atv:
-                log_warning("AirPlayOutput", f"{self._device.device_name}: Device not found")
+                log_warning("AirPlayOutput", f"Device not found: {self._device.device_name}")
                 return False
 
             self._atv = await pyatv.connect(target_atv, loop=self._loop)
             self._device.connected = True
 
-            log_debug("AirPlayOutput", f"{self._device.device_name}: Connected")
+            log_debug("AirPlayOutput", f"Connected to: {self._device.device_name}")
             return True
 
         except Exception as e:
@@ -129,7 +128,7 @@ class AirPlayOutput(BaseOutput):
         """
         # No connection exists
         if self._atv is None:
-            log_warning("AirPlayOutput", f"{self._device.device_name}: No connection, connecting...")
+            log_warning("AirPlayOutput", f"No connection: {self._device.device_name}, connecting...")
             return await self.connect()
 
         # Verify connection is still valid
@@ -137,17 +136,17 @@ class AirPlayOutput(BaseOutput):
             # Check if stream interface is accessible
             # This will raise BlockedStateError if connection is stale
             if hasattr(self._atv, 'stream') and self._atv.stream:
-                log_debug("AirPlayOutput", f"{self._device.device_name}: Connection valid")
+                log_debug("AirPlayOutput", f"Connection valid: {self._device.device_name}")
                 return True
             else:
                 # Connection stale
-                log_warning("AirPlayOutput", f"{self._device.device_name}: Stale connection, reconnecting...")
+                log_warning("AirPlayOutput", f"Stale connection: {self._device.device_name}, reconnecting...")
                 await self.disconnect()
                 await asyncio.sleep(0.2)
                 return await self.connect()
         except Exception as e:
             # Connection broken
-            log_warning("AirPlayOutput", f"{self._device.device_name}: Connection broken ({e}), reconnecting...")
+            log_warning("AirPlayOutput", f"Connection broken: {self._device.device_name} ({e}), reconnecting...")
             try:
                 await self.disconnect()
             except:
@@ -179,7 +178,7 @@ class AirPlayOutput(BaseOutput):
         """
         # Check connection before playback
         if not await self._ensure_connected():
-            log_error("AirPlayOutput", f"{self._device.device_name}: Playback failed, no connection")
+            log_error("AirPlayOutput", f"Playback failed: no connection to {self._device.device_name}")
             return False
 
         # Use lock to prevent concurrent stream operations
@@ -194,7 +193,7 @@ class AirPlayOutput(BaseOutput):
                 mode_parts.append("DSP")
             mode_info = f" ({', '.join(mode_parts)})" if mode_parts else ""
 
-            log_debug("AirPlayOutput", f"{self._device.device_name}: Playing{mode_info}")
+            log_debug("AirPlayOutput", f"Playing to: {self._device.device_name}{mode_info}")
 
             self._is_playing = True
 
@@ -256,11 +255,6 @@ class AirPlayOutput(BaseOutput):
             # Log pyatv context info
             log_debug("AirPlayOutput", f"pyatv context: sample_rate={context.sample_rate}, channels={context.channels}")
 
-            # Reset DSP internal buffers to prevent old audio leaking into new song
-            # - FFT 和 FIR 会保留旧的采样音频，播放新的歌曲会有残留音频
-            if self._enhancer and hasattr(self._enhancer, 'reset_all'):
-                self._enhancer.reset_all()
-
             # Create AudioSource (with or without DSP)
             # Pass device for live DSP config updates
             # Build metadata dict from device state
@@ -303,23 +297,7 @@ class AirPlayOutput(BaseOutput):
             # Send audio using our custom source
             await client.send_audio(self._current_source, file_metadata, volume=volume)
 
-            # Calculate AirPlay buffer delay
-            # 计算 AirPlay 缓冲延迟
-
-            # pyatv 的 send_audio() 应该会做速率调整
-            # buffer_delay 为负数则说明 pyatv播放时间大于音频数据时间，能完整播放完这首歌曲
-            # buffer_delay 为正数则说明歌曲尾部会被切掉
-
-            source = self._current_source
-            if source and source._total_frames_sent > 0 and source._send_start_time > 0:
-                audio_duration = source._total_frames_sent / source._sample_rate
-                wall_time = time.time() - source._send_start_time
-                buffer_delay = audio_duration - wall_time
-                log_debug("AirPlayOutput", f"[{self._device.device_name}] AirPlay buffer delay: "
-                         f"audio_duration={audio_duration:.2f}s, wall_time={wall_time:.2f}s, "
-                         f"buffer_delay={buffer_delay:.2f}s, total_frames={source._total_frames_sent}")
-
-            log_debug("AirPlayOutput", f"{self._device.device_name}: Stream completed")
+            log_debug("AirPlayOutput", f"Stream completed: {self._device.device_name}")
 
             # Notify playback completed
             self._device.play_state = "STOPPED"
@@ -377,7 +355,7 @@ class AirPlayOutput(BaseOutput):
             except queue.Empty:
                 break
 
-        log_debug("AirPlayOutput", f"{self._device.device_name}: Stopped")
+        log_debug("AirPlayOutput", f"Stopped: {self._device.device_name}")
 
     async def disconnect(self):
         """Disconnect from AirPlay device."""
@@ -388,7 +366,7 @@ class AirPlayOutput(BaseOutput):
             self._atv = None
 
         self._device.connected = False
-        log_debug("AirPlayOutput", f"{self._device.device_name}: Disconnected")
+        log_debug("AirPlayOutput", f"Disconnected: {self._device.device_name}")
 
     def start_background_loop(self):
         """Start async event loop in background thread."""
@@ -622,7 +600,7 @@ class AirPlayOutputManager:
 
         output = AirPlayOutput(device, enhancer)
         self._outputs[device.device_id] = output
-        log_info("AirPlayOutputManager", f"{device.device_name}: Created output")
+        log_info("AirPlayOutputManager", f"Created output: {device.device_name}")
         return output
 
     def get_output(self, device_id: str) -> Optional[AirPlayOutput]:

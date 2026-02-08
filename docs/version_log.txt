@@ -2,128 +2,135 @@
   unAirplay - Version Log / 版本日志
 ===========================================
 
-This version log is intended for regular users.
-Technical implementation details are not included.
-
-此版本日志面向普通用户阅读，不包含技术实现细节。
-
----
-
-v1.1.3 (2026-02-08)
--------------------
-
-1. Bug Fix: Audio Glitch on Song Switch / 修复：切歌时的音频杂音
-
-   - Fixed old audio briefly playing when switching to next song
-   - 修复切换到下一首歌曲时短暂播放旧音频的问题
-
-2. FFmpeg Installation Guide & Startup Check / FFmpeg 安装指南与启动检查
-
-   - Improved installation guide with clearer instructions
-   - Check FFmpeg installation before startup, show installation guide if not found
-   - 改进安装指南，提供更清晰的说明
-   - 启动前检查 FFmpeg 安装状态，未安装时显示安装指引
-
-3. Docker Image Optimization / Docker 镜像优化
-
-   - Reduced Docker image size
-   - 减小 Docker 镜像体积
-
-
 v1.1.2 (2026-02-07)
 -------------------
 
-1. AirPlay Device Offline Detection / AirPlay 设备离线检测
+1. Feature: AirPlay Device Offline Detection and Auto-Removal
+   新功能：AirPlay 设备离线检测与自动清理
 
+   - Added AIRPLAY_OFFLINE_THRESHOLD configuration (default: 3 scans)
    - Devices offline for consecutive scans will be automatically removed
    - Configurations automatically restored when device comes back online
-   - 设备连续多次扫描未检测到将自动删除虚拟设备
-   - 设备重新上线时自动恢复配置
 
-2. Bug Fix: Device Reconnection / 修复：设备重连问题
+   添加 AIRPLAY_OFFLINE_THRESHOLD 配置（默认：10 次扫描）
+   设备连续多次扫描未检测到将自动删除虚拟设备
+   设备重新上线时自动恢复配置
 
-   - Fixed playback errors after device reconnects
-   - 修复设备重连后的播放错误
+2. Bug Fix: Fixed device reconnection status update
+   修复问题：修复设备重新上线时连接状态更新问题
 
+   - Device connection status now correctly updated when device reconnects after brief offline
+   - AirPlayScanner detects reconnection and triggers status update
+   - Ensures device.connected flag is set to True when device comes back online
+
+   设备短暂离线后重新上线时，连接状态现在能正确更新
+   AirPlayScanner 检测到重连并触发状态更新
+   确保设备重新上线时 device.connected 标志被设置为 True
+
+3. Bug Fix: Fixed pyatv connection not re-established after device reconnection
+   修复问题：修复设备重连后 pyatv 连接未重新建立的问题
+
+   - Implemented dual protection mechanism: proactive reconnection + reactive detection
+   - DeviceManager now automatically re-establishes pyatv connection when device reconnects
+   - AirPlayOutput validates connection before playback and reconnects if necessary
+   - Resolves "BlockedStateError: stream is blocked" error after device reconnection
+
+   实现双重保护机制：主动重连 + 被动检测
+   DeviceManager 在检测到设备重连时自动重新建立 pyatv 连接
+   AirPlayOutput 在播放前验证连接有效性，必要时自动重连
+   解决设备重连后出现 "BlockedStateError: stream is blocked" 错误
 
 v1.1.1 (2026-02-06)
 -------------------
 
-1. Streaming Audio Support / 流媒体音频支持
+1. Bug Fix: Streaming Audio Support
+   修复问题：流媒体音频支持
 
-   - Added support for streaming audio sources (e.g., online radio)
-   - 添加流媒体音频源支持（如网络电台）
+   - Automatic detection of streaming sources using ffprobe (duration=0 or >24 hours)
+   - Skip cache for streaming sources to reduce latency
+   - Direct URL decoding for streaming audio
 
-2. AirPlay Device Exclusion / AirPlay 设备排除
+   使用 ffprobe 自动检测流媒体源（时长为0或>24小时）
+   流媒体源跳过缓存以降低延迟
+   流媒体音频直接 URL 解码
+
+2. Feature: AirPlay Device Exclusion
+   新功能：AirPlay 设备排除功能
 
    - Added AIRPLAY_EXCLUDE configuration to exclude devices by IP or name
-   - 添加 AIRPLAY_EXCLUDE 配置，可按 IP 或名称排除设备
+   - Useful for filtering out unwanted AirPlay devices
 
-3. Bug Fix: Metadata Display / 修复：元数据显示
+   添加 AIRPLAY_EXCLUDE 配置，可按 IP 或名称排除设备
+   用于过滤不需要的 AirPlay 设备
 
-   - Fixed missing song metadata in some cases
-   - 修复部分情况下歌曲元数据缺失的问题
+3. Bug Fix: Fixed missing XML metadata with ffprobe parsing
+   修复问题：修复 ffprobe 解析时缺失 XML 元数据的问题
 
-4. Bug Fix: Multi-client Switching / 修复：多客户端切换
+   - Improved metadata extraction from DLNA requests
+   - Better handling of malformed XML metadata
 
-   - Fixed errors when switching between multiple DLNA clients
-   - 修复在多个 DLNA 客户端之间切换时的错误
+   改进从 DLNA 请求中提取元数据
+   更好地处理格式错误的 XML 元数据
+
+4. Bug Fix: Fixed errors when switching between multiple DLNA clients during playback download
+   修复问题：修复播放下载期间在多个 DLNA 客户端之间切换时的错误
+
+   - Proper cleanup of download threads when switching clients
+   - Prevent race conditions during client handover
+
+   切换客户端时正确清理下载线程
+   防止客户端切换期间的竞态条件
+
+5. Cleanup: Removed old config file format compatibility handling
+   清理：移除旧配置文件格式兼容性处理
+
+   - Simplified configuration loading logic
+   - Removed legacy format support
+
+   简化配置加载逻辑
+   移除旧格式支持
 
 
 v1.1.0 (2026-02-04)
 -------------------
 
-1. Project Rename / 项目重命名
+1. Project Rename: DLNA-To-Airplay -> unAirplay
+   项目重命名：DLNA-To-Airplay -> unAirplay
 
-   - DLNA-To-Airplay -> unAirplay
+2. Web UI Redesign: More minimalist design with integrated DSP settings
+   页面重新设计：更简约的设计，DSP 设置一体化更强
 
-2. Web UI Redesign / 页面重新设计
+3. DSP Architecture Redesign: EQ & Spectral enhancement now support IIR/FFT/FIR modes.
+   Spectral gain range expanded from 1.0-2.0 to 0.5-2.0
+   DSP 架构重新设计：EQ 和频谱增强现在支持 IIR/FFT/FIR 三种模式。
+   频谱增强调整范围从 1.0-2.0 扩展至 0.5-2.0
 
-   - More minimalist design with integrated DSP settings
-   - 更简约的设计，DSP 设置一体化
+4. Cache System: Decoupled download and playback to ensure continuous playback
+   even when stream URL is interrupted
+   添加缓存系统：分离下载与播放操作，保证音乐 URL 断流情况下仍能继续播放
 
-3. DSP Enhancement / DSP 增强
+5. Bug Fix: Fixed issue where UI still shows "playing" status after track completion
+   修复问题：修复歌曲播放完成后页面仍显示播放中的问题
 
-   - EQ & Spectral enhancement now support IIR/FFT/FIR modes
-   - Spectral gain range expanded from 1.0-2.0 to 0.5-2.0
-   - EQ 和频谱增强现在支持 IIR/FFT/FIR 三种模式
-   - 频谱增强调整范围从 1.0-2.0 扩展至 0.5-2.0
-
-4. Cache System / 缓存系统
-
-   - Ensures continuous playback even when stream URL is interrupted
-   - 保证音乐 URL 断流情况下仍能继续播放
-
-5. Bug Fix / 修复
-
-   - Fixed UI still showing "playing" status after track completion
-   - 修复歌曲播放完成后页面仍显示播放中的问题
-
-6. UI Enhancement / 界面优化
-
-   - Playing devices now prioritized at the top of device list
-   - 播放中的设备优先排列在设备列表顶部
+6. UI Enhancement: Playing devices now prioritized at the top of device list
+   界面优化：播放中的设备优先排列在设备列表顶部
 
 
-v1.0.0 (Initial Release / 初始版本)
------------------------------------
+v1.0.0 (Initial Release)
+------------------------
 
-1. DLNA to AirPlay / DLNA 到 AirPlay
+1. DLNA to AirPlay: Complete basic playback functionality from DLNA to AirPlay devices
+   DLNA 到 AirPlay：完整的从 DLNA 到 AirPlay 设备的基本播放功能
 
-   - Stream audio from DLNA clients to AirPlay devices
-   - 将 DLNA 客户端的音频推送到 AirPlay 设备
+2. DLNA to Server Speaker: Complete local audio output functionality
+   DLNA 到本地扬声器：完整的从 DLNA 到 Server Speaker 本地设备播放功能
 
-2. DLNA to Server Speaker / DLNA 到本地扬声器
+3. DLNA Protocol: Standard DLNA request/response flow with optimizations for
+   popular Chinese music apps (NetEase Cloud Music, QQ Music, Kugou Music,
+   Kuwo Music, Migu Music)
+   DLNA 协议：完成标准 DLNA 流程（请求、响应），并对中国常用音乐软件
+   （网易云音乐、QQ 音乐、酷狗音乐、酷我音乐、咪咕音乐）作出 DLNA 适配
 
-   - Play audio on the server's local speaker
-   - 在服务器本地扬声器播放音频
-
-3. Music App Compatibility / 音乐应用兼容
-
-   - Optimized DLNA requests for NetEase Cloud Music, QQ Music, Kugou Music, Kuwo Music, Migu Music
-   - 针对网易云音乐、QQ音乐、酷狗音乐、酷我音乐、咪咕音乐的 DLNA 请求进行适配优化
-
-4. DSP Features / DSP 功能
-
-   - EQ, Spectral Enhancement, Dynamic Range Compression, Stereo Widening
-   - EQ、频谱增强、动态范围压缩、立体声拓宽
+4. DSP Features: Implemented EQ, Spectral Enhancement (IIR/FFT),
+   Dynamic Range Compression, and Stereo Widening
+   DSP 功能：实现 EQ、频谱增强（IIR/FFT）、动态范围压缩、立体声拓宽

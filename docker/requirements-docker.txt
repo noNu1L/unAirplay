@@ -1,5 +1,5 @@
-numpy~=2.4.0
-sounddevice~=0.5.5
-aiohttp~=3.13.0
-scipy~=1.17.0
-pyatv~=0.17.0
+numpy>=1.24.0
+sounddevice>=0.4.6
+aiohttp>=3.9.0
+scipy>=1.11.0
+pyatv>=0.17.0

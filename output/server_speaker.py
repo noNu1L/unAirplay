@@ -78,8 +78,7 @@ class ServerSpeakerOutput:
                 cache_dir=CACHE_DIR,
                 cache_filename=f"{device.device_id}_play_cache"
             ),
-            tag="ServerSpeaker",
-            device_name=device.device_name
+            tag="ServerSpeaker"
         )
         self._decoder: Optional[FFmpegDecoder] = None
         self._decoder_thread: Optional[threading.Thread] = None
@@ -100,9 +99,9 @@ class ServerSpeakerOutput:
         self._volume_controller = create_system_volume_controller()
         if self._volume_controller and self._volume_controller.is_available():
             log_info("ServerSpeaker",
-                    f"{device.device_name}: System volume controller initialized ({type(self._volume_controller).__name__})")
+                    f"System volume controller initialized: {type(self._volume_controller).__name__}")
         else:
-            log_warning("ServerSpeaker", f"{device.device_name}: System volume control not available")
+            log_warning("ServerSpeaker", "System volume control not available - volume control disabled")
 
     def set_enhancer(self, enhancer: "BaseEnhancer"):
         """Set DSP enhancer"""
@@ -171,29 +170,29 @@ class ServerSpeakerOutput:
             cache_file = self.play_url
             log_debug("ServerSpeaker", f"Using direct URL for streaming: {cache_file}")
 
-        log_debug("ServerSpeaker", f"{device_name}: Decoder thread started")
+        log_debug("ServerSpeaker", f"Decoder thread started: {device_name}")
 
         # Wait for cache file to reach minimum size (skip for streaming sources)
         if not (hasattr(self, 'play_url') and self.play_url):
-            log_debug("ServerSpeaker", f"{device_name}: Waiting for cache buffer ({MIN_CACHE_SIZE}KB)")
+            log_info("ServerSpeaker", f"Waiting for cache buffer ({MIN_CACHE_SIZE}KB): {device_name}")
             wait_start = time.time()
             max_wait = 30  # Maximum wait time in seconds
 
             while self._is_playing:
                 file_size = self._downloader.get_file_size()
                 if file_size >= MIN_CACHE_BYTES:
-                    log_debug("ServerSpeaker", f"{device_name}: Cache buffer ready ({file_size // 1024}KB)")
+                    log_info("ServerSpeaker", f"Cache buffer ready ({file_size // 1024}KB): {device_name}")
                     break
 
                 # Check for download error
                 if self._downloader.error:
-                    log_error("ServerSpeaker", f"{device_name}: Download failed, stopping decoder")
+                    log_error("ServerSpeaker", f"Download failed, stopping decoder: {device_name}")
                     self._is_playing = False
                     return
 
                 # Check timeout
                 if time.time() - wait_start > max_wait:
-                    log_error("ServerSpeaker", f"{device_name}: Cache buffer timeout")
+                    log_error("ServerSpeaker", f"Cache buffer timeout: {device_name}")
                     self._is_playing = False
                     return
 
@@ -211,13 +210,12 @@ class ServerSpeakerOutput:
                 realtime=True,
                 quiet=True
             ),
-            tag="ServerSpeaker",
-            device_name=device_name
+            tag="ServerSpeaker"
         )
         self._decoder.start(cache_file)
 
         if not self._decoder.is_running:
-            log_error("ServerSpeaker", f"{device_name}: Failed to start decoder")
+            log_error("ServerSpeaker", f"Failed to start decoder: {device_name}")
             self._is_playing = False
             return
 
@@ -228,7 +226,7 @@ class ServerSpeakerOutput:
             try:
                 data = self._decoder.read(self._chunk_bytes)
                 if not data:
-                    log_info("ServerSpeaker", f"{device_name}: Decoder stream ended")
+                    log_info("ServerSpeaker", f"Decoder stream ended: {device_name}")
                     # Notify playback completed
                     try:
                         if self._event_loop and self._event_loop.is_running():
@@ -243,7 +241,7 @@ class ServerSpeakerOutput:
 
                 if not first_data_received:
                     first_data_received = True
-                    log_debug("ServerSpeaker", f"{device_name}: First audio data received from FFmpeg")
+                    log_debug("ServerSpeaker", f"First audio data received from FFmpeg: {device_name}")
 
                     try:
                         if self._event_loop and self._event_loop.is_running():
@@ -284,16 +282,11 @@ class ServerSpeakerOutput:
                 break
 
         self._is_playing = False
-        log_debug("ServerSpeaker", f"{device_name}: Decoder thread ended")
+        log_debug("ServerSpeaker", f"Decoder thread ended: {device_name}")
 
     def _start_playback(self, url: str, seek_position: float = 0.0):
         """Start playback: download thread + decoder thread"""
         self._stop_playback_internal()
-
-        # Reset DSP internal buffers to prevent old audio leaking into new song
-        # - FFT 和 FIR 会保留旧的采样音频，播放新的歌曲会有残留音频
-        if self._enhancer and hasattr(self._enhancer, 'reset_all'):
-            self._enhancer.reset_all()
 
         self._current_url = url
         self._current_position = seek_position
@@ -303,7 +296,7 @@ class ServerSpeakerOutput:
         # Clear play_url to avoid using stale URL from previous playback
         self.play_url = None
 
-        log_debug("ServerSpeaker", f"{self._device.device_name}: Starting playback" +
+        log_debug("ServerSpeaker", f"Starting playback: {self._device.device_name}" +
                  (f" (seek: {seek_position:.1f}s)" if seek_position > 0 else ""))
 
         # Check if source is streaming (determined by ffprobe in dlna_service)
@@ -363,7 +356,7 @@ class ServerSpeakerOutput:
                 latency="low"
             )
             self._stream.start()
-            log_info("ServerSpeaker", f"{self._device.device_name}: Audio output started "
+            log_info("ServerSpeaker", f"Audio output started: {self._device.device_name} "
                      f"(rate: {self._sample_rate}, channels: {self._channels})")
         except Exception as e:
             log_error("ServerSpeaker", f"Failed to start audio output: {e}")
@@ -394,7 +387,7 @@ class ServerSpeakerOutput:
         # Clean up cache file
         self._downloader.cleanup_file()
 
-        log_debug("ServerSpeaker", f"{self._device.device_name}: Audio output stopped")
+        log_debug("ServerSpeaker", f"Audio output stopped: {self._device.device_name}")
 
     def play(self, url: str, position: float = 0.0):
         """
@@ -407,7 +400,7 @@ class ServerSpeakerOutput:
         if not self._running:
             self.start()
         self._start_playback(url, seek_position=position)
-        log_debug("ServerSpeaker", f"{self._device.device_name}: Playing")
+        log_debug("ServerSpeaker", f"Playing: {self._device.device_name}")
 
     def stop_playback(self):
         """Stop current playback and clean up cache"""
@@ -423,7 +416,7 @@ class ServerSpeakerOutput:
         # Clean up cache file
         self._downloader.cleanup_file()
 
-        log_debug("ServerSpeaker", f"{self._device.device_name}: Playback stopped")
+        log_debug("ServerSpeaker", f"Playback stopped: {self._device.device_name}")
 
     def pause(self):
         """Pause playback - record position and stop (keep cache for resume)"""
@@ -432,7 +425,7 @@ class ServerSpeakerOutput:
             self._current_position += elapsed
         self._stop_playback_internal()
         # Note: Don't clean up cache file here, so we can resume later
-        log_debug("ServerSpeaker", f"{self._device.device_name}: Paused")
+        log_debug("ServerSpeaker", f"Paused: {self._device.device_name}")
 
     def seek(self, position: float):
         """
@@ -442,7 +435,7 @@ class ServerSpeakerOutput:
             position: Position in seconds
         """
         if self._current_url:
-            log_debug("ServerSpeaker", f"{self._device.device_name}: Seek to {position:.1f}s")
+            log_debug("ServerSpeaker", f"Seek to {position:.1f}s: {self._device.device_name}")
             # Clear queue
             while not self._audio_queue.empty():
                 try:
@@ -452,7 +445,7 @@ class ServerSpeakerOutput:
             # Restart playback from new position
             self._start_playback(self._current_url, position)
         else:
-            log_warning("ServerSpeaker", f"{self._device.device_name}: Cannot seek, no URL")
+            log_warning("ServerSpeaker", f"Cannot seek: no URL: {self._device.device_name}")
 
     def set_volume(self, volume: int):
         """

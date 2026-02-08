@@ -35,14 +35,6 @@ docker compose up -d
 
 ### 2. 本地运行
 
-**前置要求：**
-- **FFmpeg**：音频处理必需。需要安装并添加到系统环境变量 PATH。
-  - **Windows**：
-    - 方式1：`winget install ffmpeg`
-    - 方式2：从 [ffmpeg.org](https://ffmpeg.org/download.html) 下载，解压到安装目录（如：`C:\Program Files\ffmpeg`），并将 `bin` 文件夹添加到系统环境变量 PATH（系统属性 → 环境变量 → Path → 新建）
-  - **Linux**：`sudo apt install ffmpeg`
-  - **macOS**：`brew install ffmpeg`
-
 安装依赖：
 
 ```bash

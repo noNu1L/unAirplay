@@ -12,27 +12,23 @@ from aiohttp import web
 from core.utils import log_info
 from core.event_bus import event_bus
 from core.events import cmd_set_dsp, cmd_reset_dsp
-from config import LOCAL_IP, WEB_PORT, DEFAULT_DSP_CONFIG, DEBUG
-from web.server_test import TestAPIRoutes
+from config import LOCAL_IP, WEB_PORT, DEFAULT_DSP_CONFIG
 
 if TYPE_CHECKING:
     from device.device_manager import DeviceManager
-    from source.dlna_service import DLNAService
 
 
 class WebServer:
     """Web control panel and API server"""
 
-    def __init__(self, device_manager: "DeviceManager", dlna_service: "DLNAService" = None):
+    def __init__(self, device_manager: "DeviceManager"):
         """
         Initialize web server.
 
         Args:
             device_manager: Device manager instance
-            dlna_service: DLNA service instance (optional, for test APIs)
         """
         self._device_manager = device_manager
-        self._dlna_service = dlna_service
         self._static_dir = os.path.join(os.path.dirname(__file__), "static")
 
     # ============== Page Routes ==============
@@ -67,8 +63,6 @@ class WebServer:
         """Set DSP configuration for a device"""
         device_id = request.match_info.get("device_id")
         device = self._device_manager.get_device(device_id)
-        req_ip = request.remote or "unknown"
-
         if not device:
             return web.json_response({"error": "Device not found"}, status=404)
 
@@ -76,8 +70,6 @@ class WebServer:
             data = await request.json()
             enabled = data.get("enabled", False)
             config = data.get("config", {})
-
-            log_info("WebAPI", f"{req_ip} -> [DSP] SetDSP -> {device.device_name} enabled={enabled}")
 
             # Publish DSP configuration command event
             event_bus.publish(cmd_set_dsp(device_id, enabled, config))
@@ -90,16 +82,13 @@ class WebServer:
         """Reset DSP to defaults for a device"""
         device_id = request.match_info.get("device_id")
         device = self._device_manager.get_device(device_id)
-        req_ip = request.remote or "unknown"
-
         if not device:
             return web.json_response({"error": "Device not found"}, status=404)
-
-        log_info("WebAPI", f"{req_ip} -> [DSP] ResetDSP -> {device.device_name}")
 
         # Publish reset DSP command event
         event_bus.publish(cmd_reset_dsp(device_id))
 
+        log_info("WebServer", f"DSP reset to defaults: {device.device_name}")
         return web.json_response({"status": "ok"})
 
     # ============== Static Files ==============
@@ -145,12 +134,6 @@ class WebServer:
         # DSP API
         app.router.add_post("/api/device/{device_id}/dsp", self.handle_set_dsp)
         app.router.add_post("/api/device/{device_id}/dsp/reset", self.handle_reset_dsp)
-
-        # Test API (only enabled in DEBUG mode)
-        if DEBUG:
-            test_api = TestAPIRoutes(self._device_manager, self._dlna_service)
-            test_api.register_routes(app)
-            log_info("WebServer", "Test API enabled (DEBUG mode)")
 
         return app
 

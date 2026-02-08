@@ -111,6 +111,12 @@ async def probe_media(url: str, timeout: float = 10.0) -> Optional[Dict[str, Any
                 result["artist"] = tags[key]
             elif key_lower == "album":
                 result["album"] = tags[key]
+
+        log_debug("FFprobe", f"Media info: codec={result['codec']}, "
+                  f"sample_rate={result['sample_rate']}, "
+                  f"bitrate={result['bitrate']}, "
+                  f"channels={result['channels']}")
+
         return result
 
     except subprocess.TimeoutExpired:
