@@ -39,7 +39,7 @@ def _get_env_list(key: str, default: list) -> list:
 
 # ================= Application Info =================
 APP_NAME = "unAirplay"
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 
 # ================= Debug Configuration =================
 # Enable debug mode (enables DEBUG level logging and Test API)
@@ -83,6 +83,11 @@ BUFFER_SIZE = 10             # Audio buffer queue size
 # Minimum cache buffer size before starting playback (KB)
 # Playback starts when downloaded cache file exceeds this size
 MIN_CACHE_SIZE = 100  # KB
+
+# ================= Pause Auto-Stop Configuration =================
+# Auto-stop paused devices after this many minutes (0 = disabled)
+# 设备暂停播放后，超过此时间(分钟)自动清空播放状态 / 0 禁用
+PAUSED_AUTO_STOP_TIMEOUT = _get_env_int("PAUSED_AUTO_STOP_TIMEOUT", 0)
 
 # Streaming audio playback behavior
 # When playing streaming sources (duration=0 or very large):

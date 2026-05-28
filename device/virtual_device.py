@@ -102,6 +102,9 @@ class VirtualDevice:
     volume: int = 100
     muted: bool = False
 
+    # Pause tracking for auto-stop
+    paused_at: Optional[float] = None  # Timestamp when pause was initiated
+
     # Connection state
     connected: bool = False
     last_seen: float = field(default_factory=time.time)
@@ -266,6 +269,7 @@ class VirtualDevice:
         """
         log_info("VirtualDevice", f"[{trace_id}] Play: {self.device_name} position={position}s transition={transition}")
 
+        self.paused_at = None
         self.play_url = url
         # For seamless transition, keep TRANSITIONING state until output signals completion
         if not transition:
@@ -292,6 +296,7 @@ class VirtualDevice:
         """Execute stop command"""
         log_info("VirtualDevice", f"[{trace_id}] Stop: {self.device_name}")
 
+        self.paused_at = None
         self.play_state = "STOPPED"
         self.play_position = 0.0
         self.play_start_time = 0.0
@@ -311,6 +316,7 @@ class VirtualDevice:
             elapsed = time.time() - self.play_start_time
             self.play_position += elapsed
 
+        self.paused_at = time.time()
         self.play_state = "PAUSED_PLAYBACK"
         self.play_start_time = 0.0
         self.last_seen = time.time()

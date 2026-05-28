@@ -1,26 +1,26 @@
 # unAirplay
 
-[English](README.md) | [中文](README_CN.md)
+[English](README_CN.md) | [中文](README.md) | [Version Log](docs/version_log.txt)
 
 ---
 
-unAirplay 是一个音频桥接工具。它能将 DLNA/UPnP 协议的音频流转发到 AirPlay 设备或服务器本地扬声器，让不支持 AirPlay 的安卓设备或音乐 App 也能向 AirPlay 设备推送音频。
+unAirplay is an audio bridging tool. It forwards DLNA/UPnP audio streams to AirPlay devices or the server's local speakers, allowing Android devices or music apps that don't support AirPlay to push audio to AirPlay devices.
 
-本项目集成了 DSP（数字信号处理）功能，可用于调整输出音频的听感。
+This project integrates DSP (Digital Signal Processing) functionality for adjusting the output audio characteristics.
 
-**注意：** 目前该项目仅在 HomePod (第一代) 设备上测试通过，尚未在 Sonos 或其他 AirPlay 品牌设备上进行充分测试。
+**Note:** Currently, this project has only been tested on HomePod (1st generation) devices and has not been fully tested on Sonos or other AirPlay brand devices.
 
-## 功能特性
+## Features
 
-- **协议桥接**：将 DLNA 客户端的音频推送到 AirPlay 设备。
-- **本地输出**：支持将音频直接通过服务器的本地声卡/扬声器播放。
-- **Web 控制面板**：访问 `http://<服务器IP>:6089`，支持播放状态监控和 DSP 音效调整（EQ、频谱增强、立体声拓宽等）。
+- **Protocol Bridging**: Push audio from DLNA clients to AirPlay devices.
+- **Local Output**: Support playing audio directly through the server's local sound card/speakers.
+- **Web Control Panel**: Access at `http://<server-ip>:6089`, supports playback status monitoring and DSP audio adjustments (EQ, spectral enhancement, stereo widening, etc.).
 
-## 如何使用
+## How to Use
 
-### 1. 使用 Docker Hub 镜像部署（推荐）
+### 1. Deploy with Docker Hub Image (Recommended)
 
-拉取并运行预构建的 Docker 镜像：
+Pull and run the pre-built Docker image:
 
 ```bash
 docker run -d \
@@ -32,61 +32,61 @@ docker run -d \
 
 **Docker Hub**: [youmiepie/un-airplay](https://hub.docker.com/r/youmiepie/un-airplay)
 
-**支持的平台**：
+**Supported Platforms**:
 - `linux/amd64` (x86_64)
 - `linux/arm64` (ARM64/Apple Silicon)
 
-### 2. 本地构建 Docker 镜像（备用）
+### 2. Build Docker Image Locally (Alternative)
 
-如果网络不好无法从 Docker Hub 拉取镜像，可以本地构建：
+If you have network issues pulling from Docker Hub, you can build locally:
 
-克隆源码：
+Clone the source code:
 
 ```bash
 git clone https://github.com/noNu1L/unAirplay
 cd unAirplay/docker
 ```
 
-启动服务：
+Start the service:
 
 ```bash
 docker compose up -d
 ```
 
-### 3. 本地运行
+### 3. Run Locally
 
-**前置要求：**
-- **FFmpeg**：音频处理必需。需要安装并添加到系统环境变量 PATH。
-  - **Windows**：
-    - 方式1：`winget install ffmpeg`
-    - 方式2：从 [ffmpeg.org](https://ffmpeg.org/download.html) 下载，解压到安装目录（如：`C:\Program Files\ffmpeg`），并将 `bin` 文件夹添加到系统环境变量 PATH（系统属性 → 环境变量 → Path → 新建）
-  - **Linux**：`sudo apt install ffmpeg`
-  - **macOS**：`brew install ffmpeg`
+**Prerequisites:**
+- **FFmpeg**: Required for audio processing. Must be installed and added to system PATH.
+  - **Windows**:
+    - Option 1: `winget install ffmpeg`
+    - Option 2: Download from [ffmpeg.org](https://ffmpeg.org/download.html), extract to your installation directory (e.g., `C:\Program Files\ffmpeg`), and add the `bin` folder to system PATH (System Properties → Environment Variables → Path → New)
+  - **Linux**: `sudo apt install ffmpeg`
+  - **macOS**: `brew install ffmpeg`
 
-安装依赖：
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-运行项目：
+Run the project:
 
 ```bash
 python run.py
 ```
 
-## 配置说明
+## Configuration
 
-项目支持自动发现和配置，通常启动即可使用。
+The project supports automatic discovery and configuration, usually ready to use upon startup.
 
-- **自动发现**：启动后，程序会自动扫描局域网内的 AirPlay 设备，并生成后缀为 `[D]` 的虚拟 DLNA 设备。
-- **Server Speaker**：如果运行环境具备音频输出能力，程序会默认生成一个 Server Speaker 虚拟桥接设备。
-- **修改设置**：编辑 `config.py` 文件可以进行自定义调整：
-  - **禁用本地播放**：设置 `ENABLE_SERVER_SPEAKER = False` 即可关闭 Server Speaker 虚拟设备。
-  - **端口设置**：可以在配置文件中修改 Web 页面和服务的运行端口。
+- **Auto Discovery**: After startup, the program will automatically scan for AirPlay devices on the local network and generate virtual DLNA devices with the suffix `[D]`.
+- **Server Speaker**: If the running environment has audio output capability, the program will generate a Server Speaker virtual bridge device by default.
+- **Modify Settings**: Edit the `config.py` file for custom adjustments:
+  - **Disable Local Playback**: Set `ENABLE_SERVER_SPEAKER = False` to disable the Server Speaker virtual device.
+  - **Port Settings**: You can modify the Web page and service ports in the configuration file.
 
-## 常见问题
+## FAQ
 
-- **关于音质**：部分安卓音乐 App 在非播放界面推送时（即非 URL 直接推送模式），原始流音质可能较低。此时开启 DSP 中的频谱增强可以在一定程度上改善听感。
-- **播放完当前歌曲却没有继续播放下一首**：如果出现此问题（安卓手机 APP 内部 DLNA 推送），请尝试关闭该软件的"忽略电池优化"、"后台高耗电白名单"等相关设置。
-- **关于 DSP 模式**：CPU 占用：FIR > IIR >= FFT。音质效果：FIR >= FFT > IIR。IIR 模式延迟最低（零延迟），FFT 模式 CPU 效率更高。根据您的优先级选择：延迟优先或资源消耗优先。
+- **About Audio Quality**: Some Android music apps may have lower original stream quality when pushing from non-playback screens (i.e., non-direct URL push mode). In this case, enabling spectral enhancement in DSP can improve the listening experience to some extent.
+- **Current Song Finishes but Next Song Doesn't Play**: If this happens when using in-app DLNA casting on Android, try disabling "Ignore Battery Optimization" or removing the app from the "High Power Consumption Whitelist" in your phone's battery settings.
+- **About DSP Modes**: CPU usage: FIR > IIR >= FFT. Audio quality: FIR >= FFT > IIR. IIR mode has lower latency (zero delay), while FFT mode provides better CPU efficiency. Choose based on your priorities: latency vs. resource consumption.

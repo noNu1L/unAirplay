@@ -343,7 +343,7 @@ class AirPlayOutput(BaseOutput):
         except asyncio.CancelledError:
             log_debug("AirPlayOutput", "Stream cancelled")
         except Exception as e:
-            log_error("AirPlayOutput", f"Stream error: {e}")
+            log_error("AirPlayOutput", f"[{self._device.device_name}] AirPlay device connection failed: {e}")
             import traceback
             log_debug("AirPlayOutput", traceback.format_exc())
         finally:
@@ -555,7 +555,7 @@ class AirPlayOutput(BaseOutput):
                     await self._prepared_source.close()
                     self._prepared_source = None
         except Exception as e:
-            log_error("AirPlayOutput", f"Seamless stream error: {e}")
+            log_error("AirPlayOutput", f"[{self._device.device_name}] AirPlay device connection failed (seamless): {e}")
             import traceback
             log_debug("AirPlayOutput", traceback.format_exc())
             # Fallback to normal playback

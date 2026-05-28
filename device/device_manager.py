@@ -8,13 +8,14 @@ This module manages the lifecycle of virtual devices:
 - Loads/saves device configuration via ConfigStore
 """
 import asyncio
+import time
 from typing import Dict, List, Optional, Any, Callable
 
 from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
 from core.events import EventType, device_added, device_removed, device_connected, device_disconnected, cmd_stop
 from core.config_store import config_store
-from config import ENABLE_SERVER_SPEAKER
+from config import ENABLE_SERVER_SPEAKER, PAUSED_AUTO_STOP_TIMEOUT
 from output.audio_device_detector import has_audio_output_device, log_audio_devices
 from .virtual_device import VirtualDevice
 from .airplay_scanner import AirPlayScanner
@@ -235,6 +236,25 @@ class DeviceManager:
         # Publish device added event
         event_bus.publish(device_added(device.device_id, device.to_dict()))
 
+    async def _auto_stop_paused_devices(self):
+        """Periodically auto-stop devices paused beyond the configured timeout."""
+        while self._running:
+            await asyncio.sleep(30)
+            if PAUSED_AUTO_STOP_TIMEOUT <= 0:
+                continue
+
+            now = time.time()
+            timeout_seconds = PAUSED_AUTO_STOP_TIMEOUT * 60
+
+            for device in list(self._devices.values()):
+                if device.play_state == "PAUSED_PLAYBACK" and device.paused_at is not None:
+                    elapsed = now - device.paused_at
+                    if elapsed >= timeout_seconds:
+                        log_info("DeviceManager",
+                                 f"Auto-stop paused device: {device.device_name} "
+                                 f"(paused for {int(elapsed / 60)}m {int(elapsed % 60)}s)")
+                        event_bus.publish(cmd_stop(device.device_id))
+
     async  def start(self, loop: Optional[asyncio.AbstractEventLoop] = None):
         """
         Start device manager.
@@ -276,6 +296,9 @@ class DeviceManager:
             self._on_airplay_found(device_info)
 
         log_info("DeviceManager", f"Device manager started with {len(self._devices)} device(s)")
+
+        # Start auto-stop background task for paused devices
+        asyncio.create_task(self._auto_stop_paused_devices())
 
     def stop(self):
         """Stop device manager."""

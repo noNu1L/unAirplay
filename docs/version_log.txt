@@ -9,6 +9,24 @@ Technical implementation details are not included.
 
 ---
 
+v1.1.5 (2026-05-28)
+-------------------
+
+1. Pause Auto-Stop / 暂停超时自动停止
+
+   - Automatically clears playback status after a configurable idle period in paused state
+   - Default disabled (PAUSED_AUTO_STOP_TIMEOUT=0), set in minutes via config.py or environment variable
+   - When triggered, the device state changes to STOPPED, which may be broadcast to your DLNA client
+   - 暂停播放后，可配置超时自动清空播放状态
+   - 默认关闭（PAUSED_AUTO_STOP_TIMEOUT=0），通过 config.py 或环境变量设置分钟数
+   - 触发后设备状态变为已停止，可能会广播到你的 DLNA 客户端
+
+2. Improved AirPlay Connection Error Logging / 改进 AirPlay 连接错误日志
+
+   - AirPlay device connection failures now show which device was affected
+   - AirPlay 设备连接失败时现在会明确显示设备名称
+
+
 v1.1.4 (2026-05-12)
 -------------------
 
