@@ -27,6 +27,17 @@ v1.1.5 (2026-05-28)
    - AirPlay 设备连接失败时现在会明确显示设备名称
 
 
+v1.1.6 (2026-05-29)
+-------------------
+
+1. Software Volume for Server Speaker / Server Speaker 软件音量控制
+
+   - Added SERVER_SPEAKER_SOFTWARE_VOLUME option for Docker/headless environments
+   - Disabled by default, preserving hardware volume control on normal systems
+   - 为 Docker/无头环境添加软件音量选项
+   - 默认关闭，正常系统下保持硬件音量控制
+
+
 v1.1.4 (2026-05-12)
 -------------------
 

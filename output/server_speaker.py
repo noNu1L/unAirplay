@@ -26,7 +26,7 @@ from core.ffmpeg_downloader import FFmpegDownloader, DownloaderConfig
 from core.ffmpeg_decoder import FFmpegDecoder, DecoderConfig
 from core.ffmpeg_utils import PCMFormat
 from output.system_volume_controller import create_system_volume_controller
-from config import SAMPLE_RATE, CHANNELS, CHUNK_DURATION_MS, BUFFER_SIZE, MIN_CACHE_SIZE
+from config import SAMPLE_RATE, CHANNELS, CHUNK_DURATION_MS, BUFFER_SIZE, MIN_CACHE_SIZE, SERVER_SPEAKER_SOFTWARE_VOLUME
 
 if TYPE_CHECKING:
     from device.virtual_device import VirtualDevice
@@ -96,9 +96,16 @@ class ServerSpeakerOutput:
         except RuntimeError:
             self._event_loop = None
 
+        # Software volume state (used when SERVER_SPEAKER_SOFTWARE_VOLUME is enabled)
+        self._software_volume = 30
+        self._software_muted = False
+
         # System volume controller
         self._volume_controller = create_system_volume_controller()
-        if self._volume_controller and self._volume_controller.is_available():
+        if SERVER_SPEAKER_SOFTWARE_VOLUME:
+            log_info("ServerSpeaker",
+                    f"{device.device_name}: Software volume mode (system volume controller bypassed)")
+        elif self._volume_controller and self._volume_controller.is_available():
             log_info("ServerSpeaker",
                     f"{device.device_name}: System volume controller initialized ({type(self._volume_controller).__name__})")
         else:
@@ -118,6 +125,13 @@ class ServerSpeakerOutput:
             except Exception as e:
                 log_warning("ServerSpeaker", f"DSP error: {e}")
         return audio
+
+    def _apply_software_volume(self, audio: np.ndarray) -> np.ndarray:
+        """Apply software volume with logarithmic curve for natural loudness perception."""
+        if self._software_muted:
+            return np.zeros_like(audio, dtype=np.float32)
+        gain = (self._software_volume / 100.0) ** 3
+        return (audio * gain).astype(np.float32)
 
     def _audio_callback(self, outdata, frames, time_info, status):
         """sounddevice callback function"""
@@ -266,6 +280,10 @@ class ServerSpeakerOutput:
 
                     # Apply DSP
                     enhanced = self._apply_dsp(audio)
+
+                    # Apply software volume (when enabled)
+                    if SERVER_SPEAKER_SOFTWARE_VOLUME:
+                        enhanced = self._apply_software_volume(enhanced)
 
                     # Put in output queue
                     try:
@@ -529,14 +547,18 @@ class ServerSpeakerOutput:
         """
         Set volume (0-100).
 
-        Args:
-            volume: Volume level 0-100
+        Uses software volume when SERVER_SPEAKER_SOFTWARE_VOLUME is enabled,
+        otherwise uses system/hardware volume controller.
         """
-        if self._volume_controller and self._volume_controller.is_available():
-            if self._volume_controller.set_volume(volume):
-                log_debug("ServerSpeaker", f"System volume set to {volume}%")
+        clamped = max(0, min(100, int(volume)))
+        if SERVER_SPEAKER_SOFTWARE_VOLUME:
+            self._software_volume = clamped
+            log_debug("ServerSpeaker", f"Software volume set to {clamped}%")
+        elif self._volume_controller and self._volume_controller.is_available():
+            if self._volume_controller.set_volume(clamped):
+                log_debug("ServerSpeaker", f"System volume set to {clamped}%")
             else:
-                log_warning("ServerSpeaker", f"Failed to set system volume to {volume}%")
+                log_warning("ServerSpeaker", f"Failed to set system volume to {clamped}%")
         else:
             log_debug("ServerSpeaker", "System volume control not available")
 
@@ -544,10 +566,13 @@ class ServerSpeakerOutput:
         """
         Set mute state.
 
-        Args:
-            muted: True to mute
+        Uses software mute when SERVER_SPEAKER_SOFTWARE_VOLUME is enabled,
+        otherwise uses system/hardware volume controller.
         """
-        if self._volume_controller and self._volume_controller.is_available():
+        if SERVER_SPEAKER_SOFTWARE_VOLUME:
+            self._software_muted = muted
+            log_debug("ServerSpeaker", f"Software mute set to {muted}")
+        elif self._volume_controller and self._volume_controller.is_available():
             if self._volume_controller.set_mute(muted):
                 log_debug("ServerSpeaker", f"System mute set to {muted}")
             else:
@@ -557,22 +582,24 @@ class ServerSpeakerOutput:
 
     def get_volume(self) -> int:
         """
-        Get current system volume.
+        Get current volume.
 
-        Returns:
-            Volume level 0-100, or 0 if not available
+        Returns software volume or system volume depending on mode.
         """
+        if SERVER_SPEAKER_SOFTWARE_VOLUME:
+            return self._software_volume
         if self._volume_controller and self._volume_controller.is_available():
             return self._volume_controller.get_volume()
         return 0
 
     def get_mute(self) -> bool:
         """
-        Get current system mute state.
+        Get current mute state.
 
-        Returns:
-            True if muted, False otherwise
+        Returns software mute or system mute depending on mode.
         """
+        if SERVER_SPEAKER_SOFTWARE_VOLUME:
+            return self._software_muted
         if self._volume_controller and self._volume_controller.is_available():
             return self._volume_controller.get_mute()
         return False
