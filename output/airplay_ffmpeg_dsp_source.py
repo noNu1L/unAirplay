@@ -26,7 +26,7 @@ from pyatv.interface import MediaMetadata
 
 from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
-from core.events import state_changed
+from core.events import output_started
 from core.ffmpeg_downloader import FFmpegDownloader, DownloaderConfig
 from core.ffmpeg_decoder import FFmpegDecoder, DecoderConfig
 from core.ffmpeg_utils import PCMFormat
@@ -366,18 +366,10 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
                 self._send_start_time = time.time()
                 log_debug(self._tag, f"[{device_name}] First audio data received")
 
-                # Start the fallback position timer now that audio is actually playing.
-                # play_start_time is intentionally left at 0 in _execute_play/_execute_seek
-                # to avoid the position counter running ahead during buffering.
-                if self._device:
-                    self._device.play_start_time = time.time()
-
                 try:
-                    await event_bus.publish_async(
-                        state_changed(self._device.device_id, state=self._device.play_state)
-                    )
+                    await event_bus.publish_async(output_started(self._device.device_id))
                 except Exception as e:
-                    log_error(self._tag, f"[{self._device_name_str}] Failed to notify state change: {e}")
+                    log_error(self._tag, f"[{self._device_name_str}] Failed to notify output start: {e}")
 
             # Apply DSP if enhancer is available and DSP is enabled
             if self._enhancer and (not self._device or self._device.dsp_enabled):

@@ -10,12 +10,14 @@
 
 ### 1.2 事件驱动架构
 
-本项目采用**事件驱动模型**，所有组件间通信必须通过事件总线（EventBus）进行，严禁直接调用。
+本项目采用**事件驱动模型**。会改变播放、音量、DSP、元数据等业务状态的操作，必须通过事件总线（EventBus）进入 `VirtualDevice` 执行；只读查询和生命周期装配可以直接调用。
 
 **核心原则：**
-- ✅ 所有状态变更通过事件通知
-- ✅ 组件间解耦，通过事件通信
-- ❌ 禁止组件间直接调用方法
+- ✅ 业务状态写入集中在 `VirtualDevice`
+- ✅ 外部组件通过命令事件请求变更
+- ✅ 执行完成后通过状态事件通知
+- ✅ 只读查询允许直接读取设备快照
+- ❌ 禁止跨层直接修改 `VirtualDevice` 的业务状态
 
 ---
 
@@ -44,9 +46,11 @@
 - 发布状态事件（STATE_CHANGED, VOLUME_CHANGED, DSP_CHANGED 等）
 
 **严格规则：**
-- ❌ 任何外部组件不得直接调用 VirtualDevice 的方法
-- ✅ 必须通过 EventBus 发布命令事件来操作
-- ✅ VirtualDevice 执行完命令后发布状态事件
+- ✅ 播放、暂停、停止、Seek、音量、DSP、媒体元数据等业务状态由 `VirtualDevice` 统一写入
+- ✅ 外部组件必须通过 EventBus 发布命令事件来请求变更
+- ✅ `VirtualDevice` 执行完命令后发布状态事件
+- ✅ 外部组件可以读取 `VirtualDevice.to_dict()` 或只读属性用于协议响应/API 返回
+- ❌ 外部组件不得直接写 `play_state`、`play_url`、`play_title`、`volume`、`dsp_config` 等业务字段
 
 ---
 
@@ -64,9 +68,11 @@
 **严格规则：**
 - ✅ DeviceManager **仅负责生命周期管理**
 - ❌ **不参与** VirtualDevice 的内部实现细节
-- ❌ **不直接操作** VirtualDevice 的状态
-- ✅ 通过 EventBus 发布命令事件来通知 VirtualDevice
-- ✅ 所有外部组件想操作设备，必须通过 DeviceManager 获取设备引用，然后通过事件通知
+- ✅ 可以更新生命周期字段，如 `connected`、`last_seen`、`airplay_address`
+- ✅ 可以装配 Output/Enhancer，加载初始配置
+- ✅ 需要改变播放、音量、DSP 等业务状态时，通过 EventBus 发布命令事件
+- ✅ 外部组件可通过 DeviceManager 获取设备引用读取状态，然后通过事件请求变更
+- ❌ 不直接修改播放、音量、DSP、元数据等业务状态
 
 ---
 
@@ -97,8 +103,8 @@
 - 发布 DSP 配置命令事件
 
 **严格规则：**
-- ❌ 禁止直接读写 ConfigStore
-- ❌ 禁止直接操作 VirtualDevice
+- ❌ 外部组件禁止直接写 ConfigStore
+- ❌ 禁止直接修改 VirtualDevice 的业务状态
 - ✅ 读取状态：通过 DeviceManager.get_device() 获取设备
 - ✅ 修改配置：发布命令事件（CMD_SET_DSP, CMD_RESET_DSP 等）
 
@@ -114,8 +120,9 @@
 - 订阅状态事件用于 UPnP GENA 通知
 
 **严格规则：**
-- ❌ 禁止直接操作 VirtualDevice
-- ✅ 接收 DLNA 请求后发布命令事件（CMD_PLAY, CMD_STOP, CMD_SEEK, CMD_SET_VOLUME 等）
+- ❌ 禁止直接修改 VirtualDevice 的业务状态
+- ✅ 可以读取设备状态，用于 GetPositionInfo/GetMediaInfo/权限判断等协议响应
+- ✅ 接收 DLNA 请求后发布命令事件（CMD_SET_MEDIA, CMD_PLAY, CMD_STOP, CMD_SEEK, CMD_SET_VOLUME 等）
 - ✅ 订阅 STATE_CHANGED 事件发送 UPnP 通知给客户端
 
 ---
@@ -140,6 +147,7 @@
 
 | 事件类型 | 发布者 | 订阅者 | 说明 |
 |---------|--------|--------|------|
+| CMD_SET_MEDIA | DLNA/WebServer | VirtualDevice | 设置当前媒体 URI 和元数据，不开始播放 |
 | CMD_PLAY | DLNA/WebServer | VirtualDevice | 播放命令 |
 | CMD_STOP | DLNA/WebServer | VirtualDevice | 停止命令 |
 | CMD_PAUSE | DLNA/WebServer | VirtualDevice | 暂停命令 |
@@ -157,7 +165,10 @@
 | STATE_CHANGED | VirtualDevice | DLNA/WebServer | 播放状态变更 |
 | VOLUME_CHANGED | VirtualDevice | WebServer | 音量变更 |
 | DSP_CHANGED | VirtualDevice | ConfigStore | DSP 配置变更 |
-| METADATA_UPDATED | VirtualDevice | WebServer | 元数据更新 |
+| METADATA_UPDATED | VirtualDevice | DLNA/WebServer | 元数据更新 |
+| STREAM_SWITCHED | Output | VirtualDevice | 无缝切歌完成，VirtualDevice 更新最终播放状态 |
+| OUTPUT_STARTED | Output | VirtualDevice | 输出端收到首帧音频，VirtualDevice 启动实际播放计时 |
+| OUTPUT_FINISHED | Output | VirtualDevice | 输出端自然播放结束，VirtualDevice 更新为停止状态 |
 
 #### 设备事件（Device Events）
 由 DeviceManager 发布：
@@ -176,14 +187,16 @@
 ```
 1. DLNA 客户端发送 SetAVTransportURI + Play
 2. DLNAService 解析请求
-3. DLNAService 发布 cmd_play(device_id, url, position) 事件
-4. VirtualDevice 订阅到 CMD_PLAY 事件
-5. VirtualDevice 执行播放：
+3. DLNAService 发布 cmd_set_media(device_id, url, metadata) 事件
+4. VirtualDevice 更新当前 URI/元数据，并发布 METADATA_UPDATED
+5. DLNAService 发布 cmd_play(device_id, url, position) 事件
+6. VirtualDevice 订阅到 CMD_PLAY 事件
+7. VirtualDevice 执行播放：
    - 更新内部状态（play_state = "PLAYING"）
    - 调用 Output.handle_action("play", uri, position)
-6. VirtualDevice 发布 state_changed(device_id, state="PLAYING") 事件
-7. DLNAService 订阅到 STATE_CHANGED 事件
-8. DLNAService 发送 UPnP GENA 通知给 DLNA 客户端
+8. VirtualDevice 发布 state_changed(device_id, state="PLAYING") 事件
+9. DLNAService 订阅到 STATE_CHANGED 事件
+10. DLNAService 发送 UPnP GENA 通知给 DLNA 客户端
 ```
 
 #### 示例 2：Web 面板修改 DSP 配置
@@ -220,6 +233,12 @@
 - 管理 FFmpeg 解码进程
 - 应用 DSP 处理（可选）
 - 输出音频流
+
+**状态边界：**
+- ✅ Output 可以读取设备配置和元数据，用于播放参数、DSP、日志和输出协议
+- ✅ Output 可以发布输出结果事件，如 OUTPUT_STARTED、OUTPUT_FINISHED、STREAM_SWITCHED
+- ❌ Output 不应直接修改 `VirtualDevice.play_state` 等业务状态
+- ❌ Output 不应直接发布最终 `STATE_CHANGED`，最终状态由 VirtualDevice 统一发布
 
 **音频链路：**
 
@@ -325,14 +344,16 @@ decoder.start(downloader.file_path)
 ### 6.1 必须遵守的原则
 
 #### ✅ 事件驱动通信
-- 所有组件间通信必须通过 EventBus
-- 发布命令事件让目标组件执行
+- 所有业务状态变更必须通过 EventBus
+- 发布命令事件让 VirtualDevice 执行
 - 订阅状态事件获取更新
+- 只读查询可以直接读取设备快照
 
 #### ✅ 职责分离
 - DeviceManager 只管理生命周期
 - VirtualDevice 是唯一的执行人
-- 外部组件通过事件通知，不直接操作
+- 外部组件通过事件请求变更，不直接修改业务状态
+- Output 是播放工具，不是状态所有者
 
 #### ✅ 配置流程
 ```
@@ -341,15 +362,25 @@ decoder.start(downloader.file_path)
 
 ### 6.2 禁止的操作
 
-#### ❌ 直接调用
+#### ❌ 直接修改业务状态
 ```python
 # 错误示例
 device.play_state = "PLAYING"  # 禁止直接修改
-device.set_volume(50)          # 禁止直接调用
+device.play_title = "Song"     # 禁止直接修改
+device.volume = 50             # 禁止直接修改
 
 # 正确示例
 event_bus.publish(cmd_play(device_id, url))
 event_bus.publish(cmd_set_volume(device_id, 50))
+```
+
+#### ✅ 允许只读查询
+```python
+# 正确示例
+device = device_manager.get_device(device_id)
+return web.json_response(device.to_dict())
+
+position = device.get_current_position()
 ```
 
 #### ❌ 跨层访问
@@ -417,7 +448,52 @@ def _execute_new_feature(self, param: Any):
 event_bus.publish(cmd_new_feature(device_id, param))
 ```
 
-### 7.2 添加新的输出类型
+### 7.2 添加新的状态更新
+
+如果新功能需要写入 `VirtualDevice` 的业务状态，应优先添加命令事件，而不是让外围组件直接改字段。
+
+示例：DLNA 更新当前媒体信息
+
+```python
+# core/events.py
+def cmd_set_media(device_id: str, url: str = None, **metadata) -> Event:
+    data = dict(metadata)
+    if url is not None:
+        data["url"] = url
+    return Event(
+        type=EventType.CMD_SET_MEDIA,
+        device_id=device_id,
+        data=data
+    )
+
+# source/dlna_service.py
+event_bus.publish(cmd_set_media(
+    device_id,
+    url,
+    title=title,
+    artist=artist,
+    album=album,
+    cover_url=cover_url,
+    duration=duration,
+))
+
+# device/virtual_device.py
+def _on_cmd_set_media(self, event: Event):
+    self.play_url = event.data.get("url", self.play_url)
+    self.play_title = event.data.get("title", self.play_title)
+    self.play_artist = event.data.get("artist", self.play_artist)
+    self.play_album = event.data.get("album", self.play_album)
+    event_bus.publish(metadata_updated(
+        self.device_id,
+        self.play_title,
+        self.play_artist,
+        self.play_album,
+        self.play_cover_url,
+        self.play_duration,
+    ))
+```
+
+### 7.3 添加新的输出类型
 
 **步骤：**
 
@@ -446,7 +522,7 @@ def _create_output_for_device(self, device: VirtualDevice):
 ### 核心原则
 
 1. **VirtualDevice 是中心** - 所有操作围绕它执行
-2. **事件驱动通信** - 禁止直接调用，必须通过事件
+2. **事件驱动通信** - 业务状态变更必须通过事件
 3. **DeviceManager 是管理员** - 只管生命周期，不管内部实现
 4. **外部组件解耦** - ConfigStore、WebServer、DLNAService 通过事件交互
 5. **Output 是工具** - 由 VirtualDevice 调配 FFmpeg 和音频输出
@@ -458,11 +534,11 @@ def _create_output_for_device(self, device: VirtualDevice):
 - [ ] 是否通过 EventBus 发布命令事件？
 - [ ] VirtualDevice 是否订阅了该事件？
 - [ ] 执行完成后是否发布状态事件？
-- [ ] 是否有直接调用 VirtualDevice 的方法？（禁止）
-- [ ] 是否有直接调用 ConfigStore 保存？（禁止）
+- [ ] 是否有跨层直接修改 VirtualDevice 业务状态？（禁止）
+- [ ] 是否有直接调用 ConfigStore 保存？（禁止外部组件写入）
 - [ ] 是否绕过 DeviceManager 创建设备？（禁止）
 
 ---
 
-**版本**: v1.1.0
-**日期**: 2026-02-04
+**版本**: v1.2.0
+**日期**: 2026-06-10

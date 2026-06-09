@@ -49,7 +49,7 @@ from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
 from core.events import (
     EventType, Event,
-    cmd_play, cmd_stop, cmd_pause, cmd_seek, cmd_set_volume, cmd_set_mute
+    cmd_play, cmd_stop, cmd_pause, cmd_seek, cmd_set_volume, cmd_set_mute, cmd_set_media
 )
 from core.ffprobe import probe_media, format_bitrate
 from config import LOCAL_IP, HTTP_PORT, SSDP_MULTICAST_ADDR, SSDP_PORT, WEB_PORT
@@ -820,20 +820,34 @@ class DLNAService:
         if action == "SetAVTransportURI":
             uri = self._extract_soap_value(body, "CurrentURI")
             if uri is not None:
-                device.play_url = uri
-                # Note: do NOT change play_state here - seamless switch relies on state stability during SetAVTransportURI
-                device.play_position = 0.0
-                device.play_start_time = 0.0
+                previous_url = device.play_url
+                was_playing = device.play_state == "PLAYING"
 
                 # Record last play URL to subscriber info
                 subscribers = self._get_device_subscribers(device.device_id)
                 subscribers[sid]["last_play_url"] = uri
+                subscribers[sid]["pending_transition"] = bool(was_playing and uri != previous_url)
 
                 # Parse metadata
                 title, artist, album, cover_url, duration_str = "", "", "", "", ""
                 metadata = self._extract_soap_value(body, "CurrentURIMetaData")
+                media_update = {"position": 0.0}
                 if metadata:
                     title, artist, album, cover_url, duration_str = self._parse_metadata(device, metadata)
+                    media_update.update({
+                        "title": title,
+                        "artist": artist,
+                        "album": album,
+                        "cover_url": cover_url,
+                        "duration": device.parse_time(duration_str),
+                    })
+
+                event_bus.publish(cmd_set_media(
+                    device.device_id,
+                    uri,
+                    trace_id=trace_id,
+                    **media_update,
+                ))
 
                 log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] SetAVTransportURI -> {device.device_name} "
                                  f"\nurl: {uri}"
@@ -875,10 +889,9 @@ class DLNAService:
             # Determine if this is a seamless transition:
             # - Current state is PLAYING (song is currently playing)
             # - URL is different from current play_url (user switched to a new song)
-            is_transition = (device.play_state == "PLAYING" and play_url != device.play_url)
-
-            # Set TRANSITIONING state before publishing CMD_PLAY (seamless switch will handle actual transition)
-            device.play_state = "TRANSITIONING"
+            is_transition = bool(subscribers[sid].pop("pending_transition", False))
+            if not is_transition:
+                is_transition = (device.play_state == "PLAYING" and play_url != device.play_url)
 
             await self._wait_for_metadata_probe(device, play_url, trace_id)
 
@@ -1160,7 +1173,7 @@ class DLNAService:
 
     def _parse_metadata(self, device: "VirtualDevice", metadata: str) -> tuple:
         """
-        Parse and update device metadata from DIDL-Lite.
+        Parse metadata from DIDL-Lite.
         Returns tuple of (title, artist, album, cover_url, duration_str) for logging.
         """
         metadata = self._decode_xml_entities(metadata).strip()
@@ -1191,12 +1204,6 @@ class DLNAService:
             or "Unknown"
         )
 
-        device.play_title = title
-        device.play_artist = artist
-        device.play_album = album
-        device.play_cover_url = cover_url
-        device.play_duration = device.parse_time(duration_str)
-
         return title, artist, album, cover_url, duration_str
 
     async def _probe_and_update_media_info(self, device: "VirtualDevice", url: str):
@@ -1223,32 +1230,40 @@ class DLNAService:
                 return
 
             if media_info:
-                # Update audio technical info
-                device.audio_format = media_info.get("codec", "")
-                device.audio_sample_rate = media_info.get("sample_rate", 0)
-                device.audio_channels = media_info.get("channels", 0)
-                device.audio_bitrate = format_bitrate(media_info.get("bitrate", 0))
-
                 # Detect streaming source (duration=0 or > 24 hours)
                 duration = media_info.get("duration", 0)
-                device.is_streaming = (duration == 0 or duration > 86400)
+                is_streaming = (duration == 0 or duration > 86400)
 
-                if device.is_streaming:
+                media_update = {
+                    "audio_format": media_info.get("codec", ""),
+                    "audio_sample_rate": media_info.get("sample_rate", 0),
+                    "audio_channels": media_info.get("channels", 0),
+                    "audio_bitrate": format_bitrate(media_info.get("bitrate", 0)),
+                    "is_streaming": is_streaming,
+                }
+
+                if is_streaming:
                     log_info("DLNA", f"Probe: {device.device_name} streaming=true duration={duration}")
 
                     # If configured, set play position to latest (current duration)
                     if STREAMING_SEEK_TO_LATEST and duration > 0:
-                        device.play_position = duration
+                        media_update["position"] = duration
 
                 # Supplement missing metadata from ffprobe (when DLNA lacks them)
                 if (not device.play_title or device.play_title == "Unknown") and media_info.get("title"):
-                    device.play_title = media_info["title"]
+                    media_update["title"] = media_info["title"]
                 if (not device.play_artist or device.play_artist == "Unknown") and media_info.get("artist"):
-                    device.play_artist = media_info["artist"]
+                    media_update["artist"] = media_info["artist"]
                 if (not device.play_album or device.play_album == "Unknown") and media_info.get("album"):
-                    device.play_album = media_info["album"]
+                    media_update["album"] = media_info["album"]
                 if device.play_duration == 0 and media_info.get("duration", 0) > 0:
-                    device.play_duration = media_info["duration"]
+                    media_update["duration"] = media_info["duration"]
+
+                event_bus.publish(cmd_set_media(
+                    device.device_id,
+                    trace_id="probe",
+                    **media_update,
+                ))
 
                 log_info("DLNA", f"Probe: {device.device_name}"
                          f"\n\ttitle:  {device.play_title}"

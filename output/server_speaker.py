@@ -21,7 +21,7 @@ import sounddevice as sd
 
 from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
-from core.events import state_changed, stream_switched
+from core.events import output_finished, output_started, stream_switched
 from core.ffmpeg_downloader import FFmpegDownloader, DownloaderConfig
 from core.ffmpeg_decoder import FFmpegDecoder, DecoderConfig
 from core.ffmpeg_utils import PCMFormat
@@ -246,9 +246,8 @@ class ServerSpeakerOutput:
                     # Notify playback completed
                     try:
                         if self._event_loop and self._event_loop.is_running():
-                            self._device.play_state = "STOPPED"
                             asyncio.run_coroutine_threadsafe(
-                                event_bus.publish_async(state_changed(self._device.device_id, state="STOPPED")),
+                                event_bus.publish_async(output_finished(self._device.device_id)),
                                 self._event_loop
                             )
                     except Exception as e:
@@ -262,7 +261,7 @@ class ServerSpeakerOutput:
                     try:
                         if self._event_loop and self._event_loop.is_running():
                             asyncio.run_coroutine_threadsafe(
-                                event_bus.publish_async(state_changed(self._device.device_id, state=self._device.play_state)),
+                                event_bus.publish_async(output_started(self._device.device_id)),
                                 self._event_loop
                             )
                     except Exception as e:

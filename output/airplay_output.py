@@ -16,7 +16,7 @@ from pyatv.const import Protocol
 
 from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
-from core.events import state_changed
+from core.events import output_finished, state_changed
 from config import SAMPLE_RATE, CHANNELS, AIRPLAY_SCAN_TIMEOUT
 from .base import BaseOutput
 from .airplay_ffmpeg_dsp_source import AirPlayFFmpegDspAudioSource
@@ -341,8 +341,7 @@ class AirPlayOutput(BaseOutput):
             log_debug("AirPlayOutput", f"{self._device.device_name}: Stream completed")
 
             # Notify playback completed
-            self._device.play_state = "STOPPED"
-            await event_bus.publish_async(state_changed(self._device.device_id, state="STOPPED"))
+            await event_bus.publish_async(output_finished(self._device.device_id))
 
         except asyncio.CancelledError:
             log_debug("AirPlayOutput", "Stream cancelled")
@@ -529,7 +528,12 @@ class AirPlayOutput(BaseOutput):
 
             log_debug("AirPlayOutput", f"{self._device.device_name}: Seamless switch completed")
 
-            # Notify state change
+            # 兼容性保护：部分 DLNA 控制端 App 曾出现无缝切歌后
+            # 卡在 TRANSITIONING 的情况，需要在切换完成路径立即发布 PLAYING。
+            # 后续 STREAM_SWITCHED 会让 VirtualDevice 再发布一次 PLAYING，
+            # 这里先保留这次提前通知，避免影响这些客户端。
+            # TODO: 后续复测受影响的 App，确认 VirtualDevice 统一状态更新
+            # 是否已经能满足它们的轮询/GENA 通知时序，再考虑收敛为只发 STREAM_SWITCHED。
             self._device.play_state = "PLAYING"
             await event_bus.publish_async(state_changed(self._device.device_id, state="PLAYING"))
             await event_bus.publish_async(stream_switched(self._device.device_id))
@@ -547,8 +551,7 @@ class AirPlayOutput(BaseOutput):
             log_debug("AirPlayOutput", f"{self._device.device_name}: Stream completed")
 
             # Notify playback completed
-            self._device.play_state = "STOPPED"
-            await event_bus.publish_async(state_changed(self._device.device_id, state="STOPPED"))
+            await event_bus.publish_async(output_finished(self._device.device_id))
 
         except asyncio.CancelledError:
             log_debug("AirPlayOutput", "Seamless stream cancelled")

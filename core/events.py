@@ -30,6 +30,7 @@ class EventType(Enum):
     CMD_SET_MUTE = auto()       # Set mute
     CMD_SET_DSP = auto()        # Set DSP configuration
     CMD_RESET_DSP = auto()      # Reset DSP to defaults
+    CMD_SET_MEDIA = auto()      # Set current media URI and metadata
 
     # ===== Device Events =====
     # Published by DeviceManager
@@ -47,6 +48,8 @@ class EventType(Enum):
     DSP_CHANGED = auto()        # DSP configuration changed
     VOLUME_CHANGED = auto()     # Volume changed
     STREAM_SWITCHED = auto()    # Seamless stream switch completed
+    OUTPUT_STARTED = auto()     # Output reported first audio frame
+    OUTPUT_FINISHED = auto()    # Output reported playback finished
 
     # ===== System Events =====
     SYSTEM_STARTUP = auto()     # System startup
@@ -161,6 +164,21 @@ def cmd_reset_dsp(device_id: str, trace_id: str = None) -> Event:
     return event
 
 
+def cmd_set_media(device_id: str, url: str = None, trace_id: str = None, **metadata) -> Event:
+    """Create set media URI/metadata command event."""
+    data = dict(metadata)
+    if url is not None:
+        data["url"] = url
+    event = Event(
+        type=EventType.CMD_SET_MEDIA,
+        device_id=device_id,
+        data=data
+    )
+    if trace_id:
+        event.trace_id = trace_id
+    return event
+
+
 # ===== State Event Factories =====
 
 def state_changed(device_id: str, state: str, **extra) -> Event:
@@ -221,6 +239,16 @@ def stream_switched(device_id: str) -> Event:
         device_id=device_id,
         data={}
     )
+
+
+def output_started(device_id: str) -> Event:
+    """Create output started event (first audio frame reached output)."""
+    return Event(type=EventType.OUTPUT_STARTED, device_id=device_id)
+
+
+def output_finished(device_id: str) -> Event:
+    """Create output finished event (playback naturally ended)."""
+    return Event(type=EventType.OUTPUT_FINISHED, device_id=device_id)
 
 
 # ===== Device Event Factories =====

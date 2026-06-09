@@ -176,7 +176,10 @@ class VirtualDevice:
         event_bus.subscribe(EventType.CMD_SET_MUTE, self._on_cmd_mute, device_id=self.device_id)
         event_bus.subscribe(EventType.CMD_SET_DSP, self._on_cmd_dsp, device_id=self.device_id)
         event_bus.subscribe(EventType.CMD_RESET_DSP, self._on_cmd_reset_dsp, device_id=self.device_id)
+        event_bus.subscribe(EventType.CMD_SET_MEDIA, self._on_cmd_set_media, device_id=self.device_id)
         event_bus.subscribe(EventType.STREAM_SWITCHED, self._on_stream_switched, device_id=self.device_id)
+        event_bus.subscribe(EventType.OUTPUT_STARTED, self._on_output_started, device_id=self.device_id)
+        event_bus.subscribe(EventType.OUTPUT_FINISHED, self._on_output_finished, device_id=self.device_id)
 
         self._subscribed = True
         log_debug("VirtualDevice", f"Subscribed to events: {self.device_name}")
@@ -202,17 +205,8 @@ class VirtualDevice:
             log_warning("VirtualDevice", f"[{event.trace_id}] Play command without URL: {self.device_name}")
             return
 
-        # Update metadata if provided
-        if "title" in event.data:
-            self.play_title = event.data.get("title", "")
-        if "artist" in event.data:
-            self.play_artist = event.data.get("artist", "")
-        if "album" in event.data:
-            self.play_album = event.data.get("album", "")
-        if "cover_url" in event.data:
-            self.play_cover_url = event.data.get("cover_url", "")
-        if "duration" in event.data:
-            self.play_duration = event.data.get("duration", 0.0)
+        # Keep compatibility with callers that send metadata on CMD_PLAY.
+        self._update_media_from_event(event)
 
         self._execute_play(url, position, transition, event.trace_id)
 
@@ -249,6 +243,10 @@ class VirtualDevice:
         """Handle reset DSP command"""
         self._execute_reset_dsp(event.trace_id)
 
+    def _on_cmd_set_media(self, event: Event):
+        """Handle media URI/metadata update command."""
+        self._update_media_from_event(event)
+
     def _on_stream_switched(self, event: Event):
         """Handle seamless stream switch completed event"""
         log_info("VirtualDevice", f"[{event.trace_id}] Stream switched: {self.device_name}")
@@ -256,7 +254,77 @@ class VirtualDevice:
         self.play_start_time = time.time()
         event_bus.publish(state_changed(self.device_id, state="PLAYING", url=self.play_url))
 
+    def _on_output_started(self, event: Event):
+        """Handle output first-audio notification."""
+        if self.play_state == "STOPPED":
+            return
+        self.play_start_time = time.time()
+        event_bus.publish(state_changed(self.device_id, state=self.play_state, url=self.play_url))
+
+    def _on_output_finished(self, event: Event):
+        """Handle output natural playback completion."""
+        self.play_state = "STOPPED"
+        self.play_position = 0.0
+        self.play_start_time = 0.0
+        event_bus.publish(state_changed(self.device_id, state="STOPPED"))
+
     # ===== Command Execution =====
+
+    def _update_media_from_event(self, event: Event):
+        """Update current media URI, metadata, and probed audio info."""
+        data = event.data
+
+        if "url" in data:
+            url = data.get("url") or ""
+            if url != self.play_url:
+                self.play_position = data.get("position", 0.0)
+                self.play_start_time = 0.0
+            self.play_url = url
+
+        if "position" in data:
+            self.play_position = data.get("position") or 0.0
+            if self.play_state == "PLAYING":
+                self.play_start_time = time.time()
+
+        metadata_changed = False
+        if "title" in data:
+            self.play_title = data.get("title", "")
+            metadata_changed = True
+        if "artist" in data:
+            self.play_artist = data.get("artist", "")
+            metadata_changed = True
+        if "album" in data:
+            self.play_album = data.get("album", "")
+            metadata_changed = True
+        if "cover_url" in data:
+            self.play_cover_url = data.get("cover_url", "")
+            metadata_changed = True
+        if "duration" in data:
+            self.play_duration = data.get("duration") or 0.0
+            metadata_changed = True
+
+        if "audio_format" in data:
+            self.audio_format = data.get("audio_format", "")
+        if "audio_bitrate" in data:
+            self.audio_bitrate = data.get("audio_bitrate", "")
+        if "audio_sample_rate" in data:
+            self.audio_sample_rate = data.get("audio_sample_rate", 0) or 0
+        if "audio_channels" in data:
+            self.audio_channels = data.get("audio_channels", 0) or 0
+        if "is_streaming" in data:
+            self.is_streaming = bool(data.get("is_streaming"))
+
+        self.last_seen = time.time()
+
+        if metadata_changed:
+            event_bus.publish(metadata_updated(
+                self.device_id,
+                self.play_title,
+                self.play_artist,
+                self.play_album,
+                self.play_cover_url,
+                self.play_duration,
+            ))
 
     def _execute_play(self, url: str, position: float = 0.0, transition: bool = False, trace_id: str = "--------"):
         """Execute play command
@@ -272,9 +340,7 @@ class VirtualDevice:
         self.paused_at = None
         self.play_url = url
         # For seamless transition, keep TRANSITIONING state until output signals completion
-        if not transition:
-            self.play_state = "PLAYING"
-        # else: keep current state (should already be TRANSITIONING from DLNA Play command)
+        self.play_state = "TRANSITIONING" if transition else "PLAYING"
         self.play_position = position
         self.play_start_time = 0.0  # Will be set when audio actually starts playing
         self.last_seen = time.time()
@@ -283,14 +349,11 @@ class VirtualDevice:
         if self._output:
             self._output.handle_action("play", uri=url, position=position, transition=transition)
 
-        # For non-transition, publish state changed immediately
-        # For transition, state change will be published after STREAM_SWITCHED event
-        if not transition:
-            event_bus.publish(state_changed(
-                self.device_id,
-                state="PLAYING",
-                url=url
-            ))
+        event_bus.publish(state_changed(
+            self.device_id,
+            state=self.play_state,
+            url=url
+        ))
 
     def _execute_stop(self, trace_id: str = "--------"):
         """Execute stop command"""
