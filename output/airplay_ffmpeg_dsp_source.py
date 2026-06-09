@@ -158,6 +158,25 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         """Return duration in seconds."""
         return int(self._duration)
 
+    @staticmethod
+    def _clean_metadata_value(value: Optional[str]) -> Optional[str]:
+        """Normalize empty placeholder metadata values."""
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value or value.lower() == "unknown":
+            return None
+        return value
+
+    def _metadata_value(self, key: str, device_attr: str) -> Optional[str]:
+        """Return latest metadata from device, falling back to construction-time data."""
+        value = None
+        if self._device is not None:
+            value = getattr(self._device, device_attr, None)
+        if self._clean_metadata_value(value) is None:
+            value = self._metadata.get(key)
+        return self._clean_metadata_value(value)
+
     async def get_metadata(self) -> MediaMetadata:
         """Return media metadata.
 
@@ -165,11 +184,15 @@ class AirPlayFFmpegDspAudioSource(AudioSource):
         # Apple TV should display title/artist/album via DAAP tags sent over RTSP
         # HomePod may not display this metadata in Home App (likely uses MRP protocol)
         """
+        duration = self._duration
+        if self._device is not None and getattr(self._device, "play_duration", 0) > 0:
+            duration = self._device.play_duration
+
         return MediaMetadata(
-            title=self._metadata.get("title"),
-            artist=self._metadata.get("artist"),
-            album=self._metadata.get("album"),
-            duration=self._duration if self._duration > 0 else None
+            title=self._metadata_value("title", "play_title"),
+            artist=self._metadata_value("artist", "play_artist"),
+            album=self._metadata_value("album", "play_album"),
+            duration=duration if duration > 0 else None
         )
 
     def _start_download_and_decoder(self):

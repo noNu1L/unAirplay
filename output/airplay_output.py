@@ -13,7 +13,6 @@ from typing import Optional, TYPE_CHECKING
 
 import pyatv
 from pyatv.const import Protocol
-from pyatv.interface import MediaMetadata
 
 from core.utils import log_info, log_debug, log_warning, log_error
 from core.event_bus import event_bus
@@ -79,6 +78,14 @@ class AirPlayOutput(BaseOutput):
         self._sample_rate = SAMPLE_RATE
         self._channels = CHANNELS
 
+    def _build_metadata(self) -> dict:
+        """Build metadata dict from the latest device state."""
+        return {
+            "title": self._device.play_title,
+            "artist": self._device.play_artist,
+            "album": self._device.play_album,
+        }
+
     def set_enhancer(self, enhancer: "BaseEnhancer"):
         """Set DSP enhancer."""
         self._enhancer = enhancer
@@ -115,7 +122,7 @@ class AirPlayOutput(BaseOutput):
                 log_warning("AirPlayOutput", f"{self._device.device_name}: Device not found")
                 return False
 
-            self._atv = await pyatv.connect(target_atv, loop=self._loop)
+            self._atv = await pyatv.connect(target_atv, loop=self._loop or asyncio.get_event_loop())
             self._device.connected = True
 
             log_debug("AirPlayOutput", f"{self._device.device_name}: Connected")
@@ -278,12 +285,7 @@ class AirPlayOutput(BaseOutput):
 
             # Create AudioSource (with or without DSP)
             # Pass device for live DSP config updates
-            # Build metadata dict from device state
-            metadata = {
-                "title": self._device.play_title,
-                "artist": self._device.play_artist,
-                "album": self._device.play_album,
-            }
+            metadata = self._build_metadata()
             self._current_source = AirPlayFFmpegDspAudioSource(
                 url=url,
                 seek_position=seek_position,
@@ -302,6 +304,8 @@ class AirPlayOutput(BaseOutput):
             file_metadata = await self._current_source.get_metadata()
             if file_metadata.title:
                 log_debug("AirPlayOutput", f"Metadata: title={file_metadata.title}, artist={file_metadata.artist}, album={file_metadata.album}")
+            else:
+                log_warning("AirPlayOutput", f"{self._device.device_name}: no usable title metadata before AirPlay send")
 
             # Handle volume
             volume = None
@@ -394,12 +398,7 @@ class AirPlayOutput(BaseOutput):
             playback_manager = raop_stream.playback_manager
             core = raop_stream.core
 
-            # Build metadata dict
-            metadata = {
-                "title": self._device.play_title,
-                "artist": self._device.play_artist,
-                "album": self._device.play_album,
-            }
+            metadata = self._build_metadata()
 
             # Check if source is streaming
             is_streaming = getattr(self._device, 'is_streaming', False) if self._device else False
@@ -488,6 +487,10 @@ class AirPlayOutput(BaseOutput):
 
             # Get metadata
             file_metadata = await prepared_source.get_metadata()
+            if file_metadata.title:
+                log_debug("AirPlayOutput", f"Metadata: title={file_metadata.title}, artist={file_metadata.artist}, album={file_metadata.album}")
+            else:
+                log_warning("AirPlayOutput", f"{self._device.device_name}: no usable title metadata before AirPlay send")
 
             # Handle volume
             volume = None

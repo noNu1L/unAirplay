@@ -40,6 +40,7 @@ import html
 import time
 import uuid
 import aiohttp
+import xml.etree.ElementTree as ET
 from aiohttp import web
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from xml.sax.saxutils import escape as xml_escape
@@ -276,6 +277,8 @@ SINK_FORMATS = ",".join([
     "http-get:*:audio/*:*",
 ])
 
+METADATA_PROBE_PLAY_WAIT = 1.5
+
 
 def soap_response(action: str, service: str, params: str = "") -> str:
     """Generate SOAP Response"""
@@ -379,6 +382,7 @@ class DLNAService:
         # UPnP Event Subscription Management (per device)
         # {device_id: {sid: {"callback": url, "timeout": int, "expires": float, "seq": int}}}
         self._subscribers: Dict[str, Dict[str, dict]] = {}
+        self._probe_tasks: Dict[str, asyncio.Task] = {}
 
         # Subscribe to state change events for UPnP GENA notifications
         event_bus.subscribe(EventType.STATE_CHANGED, self._on_state_changed)
@@ -544,6 +548,179 @@ class DLNAService:
         """Decode XML/HTML entities"""
         return html.unescape(text)
 
+    @staticmethod
+    def _xml_local_name(tag: str) -> str:
+        """Return XML local tag/attribute name without namespace."""
+        return tag.rsplit("}", 1)[-1].split(":", 1)[-1]
+
+    @staticmethod
+    def _missing_metadata_value(value: Optional[str]) -> bool:
+        """Return True when a metadata field has no useful value."""
+        return not value or str(value).strip().lower() == "unknown"
+
+    def _extract_soap_value(self, body: str, name: str) -> Optional[str]:
+        """
+        Extract a SOAP argument value.
+
+        DLNA clients differ here: most XML-escape DIDL-Lite metadata as text, while
+        some send it as direct child XML. ElementTree handles both valid forms, and
+        the regex fallback keeps compatibility with malformed-but-common payloads.
+        """
+        try:
+            root = ET.fromstring(body)
+            for elem in root.iter():
+                if self._xml_local_name(elem.tag) == name:
+                    text = elem.text or ""
+                    children = list(elem)
+                    if children:
+                        text += "".join(
+                            ET.tostring(child, encoding="unicode") for child in children
+                        )
+                    return self._decode_xml_entities(text.strip())
+        except ET.ParseError:
+            pass
+
+        pattern = rf"<(?:[\w.-]+:)?{re.escape(name)}\b[^>]*>(.*?)</(?:[\w.-]+:)?{re.escape(name)}>"
+        match = re.search(pattern, body, re.DOTALL)
+        if not match:
+            return None
+        return self._decode_xml_entities(match.group(1).strip())
+
+    def _extract_xml_text_by_names(self, xml_text: str, names: tuple[str, ...]) -> Optional[str]:
+        """Extract the first non-empty text node whose local name is in names."""
+        try:
+            root = ET.fromstring(xml_text)
+            for elem in root.iter():
+                if self._xml_local_name(elem.tag) in names:
+                    value = "".join(elem.itertext()).strip()
+                    if value:
+                        return self._decode_xml_entities(value)
+        except ET.ParseError:
+            pass
+        return None
+
+    def _extract_xml_attr_by_name(self, xml_text: str, name: str) -> Optional[str]:
+        """Extract the first non-empty XML attribute matching local name."""
+        try:
+            root = ET.fromstring(xml_text)
+            for elem in root.iter():
+                for attr_name, value in elem.attrib.items():
+                    if self._xml_local_name(attr_name) == name and value:
+                        return self._decode_xml_entities(value.strip())
+        except ET.ParseError:
+            pass
+        return None
+
+    def _extract_metadata_tag(self, metadata: str, names: tuple[str, ...]) -> Optional[str]:
+        """Regex fallback for DIDL-Lite metadata fields."""
+        for name in names:
+            pattern = (
+                rf"<(?:[\w.-]+:)?{re.escape(name)}\b[^>]*>"
+                rf"(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))"
+                rf"</(?:[\w.-]+:)?{re.escape(name)}>"
+            )
+            match = re.search(pattern, metadata, re.DOTALL | re.IGNORECASE)
+            if match:
+                value = match.group(1) if match.group(1) is not None else match.group(2)
+                if value and value.strip():
+                    return self._decode_xml_entities(value.strip())
+        return None
+
+    def _extract_metadata_attr(self, metadata: str, name: str) -> Optional[str]:
+        """Regex fallback for DIDL-Lite metadata attributes."""
+        match = re.search(
+            rf"\b{re.escape(name)}\s*=\s*(['\"])(.*?)\1",
+            metadata,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if not match:
+            return None
+        return self._decode_xml_entities(match.group(2).strip())
+
+    def _build_current_didl_metadata(self, device: "VirtualDevice") -> str:
+        """Build DIDL-Lite metadata for the current device state."""
+        has_metadata = any([
+            not self._missing_metadata_value(device.play_title),
+            not self._missing_metadata_value(device.play_artist),
+            not self._missing_metadata_value(device.play_album),
+            not self._missing_metadata_value(device.play_cover_url),
+            bool(device.play_url),
+        ])
+        if not has_metadata:
+            return ""
+
+        title = device.play_title if not self._missing_metadata_value(device.play_title) else "Unknown"
+        artist = device.play_artist if not self._missing_metadata_value(device.play_artist) else ""
+        album = device.play_album if not self._missing_metadata_value(device.play_album) else ""
+        cover_url = device.play_cover_url if not self._missing_metadata_value(device.play_cover_url) else ""
+
+        def _text(value: str) -> str:
+            return xml_escape(value or "")
+
+        def _attr(value: str) -> str:
+            return xml_escape(value or "", {'"': "&quot;"})
+
+        duration_attr = ""
+        if device.play_duration > 0:
+            duration_attr = f' duration="{_attr(device.format_duration())}"'
+
+        parts = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
+            'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">',
+            '<item id="0" parentID="0" restricted="1">',
+            f"<dc:title>{_text(title)}</dc:title>",
+        ]
+        if artist:
+            parts.append(f"<upnp:artist>{_text(artist)}</upnp:artist>")
+            parts.append(f"<dc:creator>{_text(artist)}</dc:creator>")
+        if album:
+            parts.append(f"<upnp:album>{_text(album)}</upnp:album>")
+        if cover_url:
+            parts.append(f"<upnp:albumArtURI>{_text(cover_url)}</upnp:albumArtURI>")
+        parts.append("<upnp:class>object.item.audioItem.musicTrack</upnp:class>")
+        if device.play_url:
+            parts.append(f'<res{duration_attr}>{_text(device.play_url)}</res>')
+        parts.append("</item></DIDL-Lite>")
+        return "".join(parts)
+
+    async def _wait_for_metadata_probe(self, device: "VirtualDevice", url: str, trace_id: str):
+        """Wait briefly for an in-flight ffprobe task when metadata is still missing."""
+        if device.play_url != url:
+            return
+
+        if not self._missing_metadata_value(device.play_title):
+            return
+
+        task = self._probe_tasks.get(device.device_id)
+        if not task or task.done():
+            return
+
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=METADATA_PROBE_PLAY_WAIT)
+        except asyncio.TimeoutError:
+            log_debug(
+                "DLNA",
+                f"[{trace_id}] Metadata probe still running for {device.device_name}; "
+                f"starting playback with current metadata",
+            )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            log_debug("DLNA", f"[{trace_id}] Metadata probe failed before playback: {e}")
+
+    def _start_probe_task(self, device: "VirtualDevice", uri: str):
+        """Start and track async media probing for a device URL."""
+        task = asyncio.create_task(self._probe_and_update_media_info(device, uri))
+        self._probe_tasks[device.device_id] = task
+
+        def _clear_probe_task(done_task: asyncio.Task, device_id: str = device.device_id):
+            if self._probe_tasks.get(device_id) is done_task:
+                self._probe_tasks.pop(device_id, None)
+
+        task.add_done_callback(_clear_probe_task)
+
     def _get_device_from_request(self, request: web.Request) -> Optional["VirtualDevice"]:
         """Get virtual device from request path"""
         device_id = request.match_info.get("device_id")
@@ -641,9 +818,8 @@ class DLNAService:
                 )
 
         if action == "SetAVTransportURI":
-            match = re.search(r"<CurrentURI>([^<]*)</CurrentURI>", body)
-            if match:
-                uri = self._decode_xml_entities(match.group(1))
+            uri = self._extract_soap_value(body, "CurrentURI")
+            if uri is not None:
                 device.play_url = uri
                 # Note: do NOT change play_state here - seamless switch relies on state stability during SetAVTransportURI
                 device.play_position = 0.0
@@ -655,9 +831,8 @@ class DLNAService:
 
                 # Parse metadata
                 title, artist, album, cover_url, duration_str = "", "", "", "", ""
-                metadata_match = re.search(r"<CurrentURIMetaData>([^<]*)</CurrentURIMetaData>", body)
-                if metadata_match:
-                    metadata = self._decode_xml_entities(metadata_match.group(1))
+                metadata = self._extract_soap_value(body, "CurrentURIMetaData")
+                if metadata:
                     title, artist, album, cover_url, duration_str = self._parse_metadata(device, metadata)
 
                 log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] SetAVTransportURI -> {device.device_name} "
@@ -665,7 +840,8 @@ class DLNAService:
                                  f"\ntitle: {title} artist: {artist} album: {album} duration: {duration_str}")
 
                 # Probe media info asynchronously (non-blocking)
-                asyncio.create_task(self._probe_and_update_media_info(device, uri))
+                if uri:
+                    self._start_probe_task(device, uri)
 
             response = soap_response("SetAVTransportURI", "AVTransport")
 
@@ -704,13 +880,26 @@ class DLNAService:
             # Set TRANSITIONING state before publishing CMD_PLAY (seamless switch will handle actual transition)
             device.play_state = "TRANSITIONING"
 
+            await self._wait_for_metadata_probe(device, play_url, trace_id)
+
             log_debug("DLNA", f"{req_ip} [{trace_id}] -> [AVTransport] Play -> {device.device_name} -> position: {device.play_position} url: {play_url} transition={is_transition}")
 
             # 记录到订阅者（用于下次恢复）
             # Record to subscriber (for next recovery)
             subscribers[sid]["last_play_url"] = play_url
 
-            event_bus.publish(cmd_play(device.device_id, play_url, device.play_position, trace_id=trace_id, transition=is_transition))
+            event_bus.publish(cmd_play(
+                device.device_id,
+                play_url,
+                device.play_position,
+                trace_id=trace_id,
+                transition=is_transition,
+                title=device.play_title,
+                artist=device.play_artist,
+                album=device.play_album,
+                cover_url=device.play_cover_url,
+                duration=device.play_duration,
+            ))
             response = soap_response("Play", "AVTransport")
 
         elif action == "Stop":
@@ -783,10 +972,11 @@ class DLNAService:
             position_str = device.format_position()
             duration_str = device.format_duration()
             uri_escaped = xml_escape(device.play_url) if device.play_url else ""
+            metadata_escaped = xml_escape(self._build_current_didl_metadata(device))
             response = soap_response("GetPositionInfo", "AVTransport", f"""
       <Track>1</Track>
       <TrackDuration>{duration_str}</TrackDuration>
-      <TrackMetaData></TrackMetaData>
+      <TrackMetaData>{metadata_escaped}</TrackMetaData>
       <TrackURI>{uri_escaped}</TrackURI>
       <RelTime>{position_str}</RelTime>
       <AbsTime>{position_str}</AbsTime>
@@ -803,11 +993,12 @@ class DLNAService:
         elif action == "GetMediaInfo":
             duration_str = device.format_duration()
             uri_escaped = xml_escape(device.play_url) if device.play_url else ""
+            metadata_escaped = xml_escape(self._build_current_didl_metadata(device))
             response = soap_response("GetMediaInfo", "AVTransport", f"""
       <NrTracks>1</NrTracks>
       <MediaDuration>{duration_str}</MediaDuration>
       <CurrentURI>{uri_escaped}</CurrentURI>
-      <CurrentURIMetaData></CurrentURIMetaData>
+      <CurrentURIMetaData>{metadata_escaped}</CurrentURIMetaData>
       <NextURI></NextURI>
       <NextURIMetaData></NextURIMetaData>
       <PlayMedium>NETWORK</PlayMedium>
@@ -972,30 +1163,33 @@ class DLNAService:
         Parse and update device metadata from DIDL-Lite.
         Returns tuple of (title, artist, album, cover_url, duration_str) for logging.
         """
-        # Standard format: <tag>text</tag>
-        title_match = re.search(r'<dc:title>([^<]+)</dc:title>', metadata)
-        artist_match = re.search(r'<upnp:artist[^>]*>([^<]+)</upnp:artist>', metadata)
-        album_match = re.search(r'<upnp:album>([^<]+)</upnp:album>', metadata)
-        album_art_match = re.search(r'<upnp:albumArtURI>([^<]+)</upnp:albumArtURI>', metadata)
-        duration_match = re.search(r'duration="([^"]+)"', metadata)
+        metadata = self._decode_xml_entities(metadata).strip()
 
-        # Kugou CDATA format: <tag><![CDATA[text]]></tag>
-        if not title_match:
-            title_match = re.search(r'<dc:title><!\[CDATA\[([^\]]+)\]\]></dc:title>', metadata)
-        if not artist_match:
-            artist_match = re.search(r'<upnp:artist[^>]*><!\[CDATA\[([^\]]+)\]\]></upnp:artist>', metadata)
-        if not album_match:
-            album_match = re.search(r'<upnp:album><!\[CDATA\[([^\]]+)\]\]></upnp:album>', metadata)
-
-        # Kuwo format: uses <dc:creator> instead of <upnp:artist>
-        if not artist_match:
-            artist_match = re.search(r'<dc:creator>([^<]+)</dc:creator>', metadata)
-
-        title = self._decode_xml_entities(title_match.group(1)) if title_match else "Unknown"
-        artist = self._decode_xml_entities(artist_match.group(1)) if artist_match else "Unknown"
-        album = self._decode_xml_entities(album_match.group(1)) if album_match else "Unknown"
-        cover_url = self._decode_xml_entities(album_art_match.group(1)) if album_art_match else "Unknown"
-        duration_str = duration_match.group(1) if duration_match else "Unknown"
+        title = (
+            self._extract_xml_text_by_names(metadata, ("title",))
+            or self._extract_metadata_tag(metadata, ("title",))
+            or "Unknown"
+        )
+        artist = (
+            self._extract_xml_text_by_names(metadata, ("artist", "creator"))
+            or self._extract_metadata_tag(metadata, ("artist", "creator"))
+            or "Unknown"
+        )
+        album = (
+            self._extract_xml_text_by_names(metadata, ("album",))
+            or self._extract_metadata_tag(metadata, ("album",))
+            or "Unknown"
+        )
+        cover_url = (
+            self._extract_xml_text_by_names(metadata, ("albumArtURI",))
+            or self._extract_metadata_tag(metadata, ("albumArtURI",))
+            or "Unknown"
+        )
+        duration_str = (
+            self._extract_xml_attr_by_name(metadata, "duration")
+            or self._extract_metadata_attr(metadata, "duration")
+            or "Unknown"
+        )
 
         device.play_title = title
         device.play_artist = artist
@@ -1019,7 +1213,15 @@ class DLNAService:
         try:
             from config import STREAMING_SEEK_TO_LATEST
 
+            if device.play_url != url:
+                log_debug("DLNA", f"Probe: {device.device_name} skip stale url before probe")
+                return
+
             media_info = await probe_media(url, timeout=10.0)
+            if device.play_url != url:
+                log_debug("DLNA", f"Probe: {device.device_name} skip stale url after probe")
+                return
+
             if media_info:
                 # Update audio technical info
                 device.audio_format = media_info.get("codec", "")

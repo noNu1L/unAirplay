@@ -10,7 +10,7 @@ def _get_env_bool(key: str, default: bool) -> bool:
     value = os.getenv(key)
     if value is None:
         return default
-    return value.lower() in "true"
+    return value.strip().lower() in ("true", "1", "yes", "on", "t", "y")
 
 def _get_env_int(key: str, default: int) -> int:
     """Get integer value from environment variable"""
